@@ -1,0 +1,54 @@
+preset: default
+
+hardware:
+  whisper_device: cuda
+  whisper_model: medium
+  whisper_compute_type: float16
+  ffmpeg_video_encoder: libx264
+  proxy_height: 720
+  motion_sample_height: 480
+  max_workers: 2
+
+ollama:
+  host: http://127.0.0.1:11434
+  vision_model: qwen2.5vl:7b
+  merge_model: llama3.2:3b
+  timeout_seconds: 120
+
+analysis:
+  mode: auto
+  window_seconds: 30
+  prefilter_top_percent: 15
+  max_vlm_windows: 80
+  heuristic_weights:
+    audio: 0.35
+    motion: 0.30
+    scene_density: 0.15
+    keywords: 0.20
+  hybrid_weights:
+    heuristic: 0.4
+    vlm: 0.6
+  silence_rms_threshold: 0.02
+  silence_motion_threshold: 0.05
+
+clip:
+  pre_pad_seconds: 3
+  post_pad_seconds: 5
+  min_duration: 15
+  max_duration_youtube: 600
+  max_duration_reels: 90
+  ideal_reels_duration: 45
+  max_clips: 15
+  merge_gap_seconds: 10
+  dedupe_overlap_ratio: 0.5
+
+proxy:
+  video_mode: audio_only
+  video_bitrate: 2M
+  audio_sample_rate: 16000
+  min_free_disk_multiplier: 2.0
+
+keywords: []
+
+paths:
+  prompts_dir: prompts

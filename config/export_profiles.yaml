@@ -1,0 +1,28 @@
+youtube:
+  width: 1920
+  height: 1080
+  aspect: "16:9"
+  video_codec: libx264
+  nvenc_codec: h264_nvenc
+  nvenc_preset: p5
+  nvenc_cq: 20
+  crf: 23
+  preset: medium
+  audio_codec: aac
+  audio_bitrate: 192k
+  max_duration: 600
+
+reels:
+  width: 1080
+  height: 1920
+  aspect: "9:16"
+  video_codec: libx264
+  nvenc_codec: h264_nvenc
+  nvenc_preset: p5
+  nvenc_cq: 22
+  crf: 24
+  preset: medium
+  audio_codec: aac
+  audio_bitrate: 128k
+  max_duration: 90
+  crop_mode: center

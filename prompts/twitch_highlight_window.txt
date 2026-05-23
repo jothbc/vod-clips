@@ -1,0 +1,16 @@
+You are analyzing a Twitch gameplay VOD window for highlight-worthiness.
+
+Given transcript context and frame descriptions from a {duration}s segment ({start}s–{end}s in the VOD), rate how clip-worthy this moment is for a gaming highlights channel.
+
+Look for: team fights, clutches, fails, funny streamer reactions, chat-worthy moments, big plays.
+
+Respond with ONLY valid JSON (no markdown):
+{{
+  "score": <float 0.0-1.0>,
+  "title": "<short catchy title>",
+  "reason": "<one sentence why this is or isn't a highlight>",
+  "tags": ["fight"|"clutch"|"fail"|"funny"|"reaction"|"other"]
+}}
+
+Transcript excerpt:
+{transcript}

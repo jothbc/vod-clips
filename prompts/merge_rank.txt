@@ -1,0 +1,15 @@
+You are ranking Twitch VOD highlight candidates. Merge overlapping moments and pick the best clips.
+
+Input: JSON array of candidate highlights with start, end, score, title, reason, source.
+
+Output ONLY valid JSON:
+{
+  "highlights": [
+    {"start": <float>, "end": <float>, "score": <float>, "title": "<str>", "reason": "<str>", "source": "hybrid"|"heuristic"|"vlm"}
+  ]
+}
+
+Keep at most {max_clips} clips. Prefer higher scores. Merge overlaps within {merge_gap}s.
+
+Candidates:
+{candidates}

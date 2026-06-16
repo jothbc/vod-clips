@@ -1,19 +1,21 @@
 import { useState } from "react";
+import { apiUrl } from "../api/base";
 import type { ClipItem } from "../api/client";
 
 interface Props {
   clips: ClipItem[];
   outputDir: string;
+  showDownload?: boolean;
 }
 
-export default function ClipsGallery({ clips, outputDir }: Props) {
+export default function ClipsGallery({ clips, outputDir, showDownload = false }: Props) {
   const [tab, setTab] = useState<"youtube" | "reels">("youtube");
+  const [activePlayIndex, setActivePlayIndex] = useState<number | null>(null);
 
   if (!clips.length) return null;
 
-  const filtered = clips.filter((c) =>
-    tab === "youtube" ? c.youtube_url : c.reels_url
-  );
+  const exported = clips.filter((c) => c.youtube_url || c.reels_url);
+  const filtered = exported.filter((c) => (tab === "youtube" ? c.youtube_url : c.reels_url));
 
   return (
     <div className="card">
@@ -23,26 +25,62 @@ export default function ClipsGallery({ clips, outputDir }: Props) {
       </p>
 
       <div className="tabs">
-        <button type="button" className={tab === "youtube" ? "active" : ""} onClick={() => setTab("youtube")}>
+        <button
+          type="button"
+          className={tab === "youtube" ? "active" : ""}
+          onClick={() => {
+            setTab("youtube");
+            setActivePlayIndex(null);
+          }}
+        >
           YouTube (16:9)
         </button>
-        <button type="button" className={tab === "reels" ? "active" : ""} onClick={() => setTab("reels")}>
+        <button
+          type="button"
+          className={tab === "reels" ? "active" : ""}
+          onClick={() => {
+            setTab("reels");
+            setActivePlayIndex(null);
+          }}
+        >
           Reels (9:16)
         </button>
       </div>
 
       <div className="clips-grid">
         {filtered.map((clip) => {
-          const url = tab === "youtube" ? clip.youtube_url : clip.reels_url;
-          if (!url) return null;
+          const rel = tab === "youtube" ? clip.youtube_url : clip.reels_url;
+          if (!rel) return null;
+          const src = apiUrl(rel);
+          const filename =
+            tab === "youtube" ? clip.youtube_filename : clip.reels_filename;
+          const isActive = activePlayIndex === clip.index;
+
           return (
             <div key={`${clip.index}-${tab}`} className={`clip-card ${tab === "reels" ? "reels" : ""}`}>
-              <video src={url} controls preload="metadata" />
+              {isActive ? (
+                <video src={src} controls preload="metadata" playsInline />
+              ) : (
+                <button
+                  type="button"
+                  className="clip-preview-placeholder"
+                  onClick={() => setActivePlayIndex(clip.index)}
+                >
+                  <span>▶ Play clip</span>
+                  <span className="file-path-hint">{clip.title}</span>
+                </button>
+              )}
               <div className="clip-meta">
                 <h3>{clip.title}</h3>
                 <p>
-                  Score {clip.score.toFixed(1)} · {formatTime(clip.start)}–{formatTime(clip.end)} · {clip.source}
+                  Score {clip.score.toFixed(1)} · {formatTime(clip.start)}–{formatTime(clip.end)} ·{" "}
+                  {clip.source}
                 </p>
+                {showDownload && (
+                  <a className="clip-download" href={src} download={filename || undefined}>
+                    Baixar MP4
+                  </a>
+                )}
               </div>
             </div>
           );

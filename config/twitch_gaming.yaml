@@ -4,34 +4,42 @@ hardware:
   whisper_device: cuda
   whisper_model: medium
   whisper_compute_type: float16
-  ffmpeg_video_encoder: h264_nvenc
+  ffmpeg_video_encoder: libx264
   proxy_height: 720
   motion_sample_height: 480
   max_workers: 2
+  ffmpeg_threads: 6
+  opencv_threads: 2
+  whisper_chunk_minutes: 10
 
 # Ollama URL for reels (WSL). Uses localhost — not Windows host IP.
 # WSL2 forwards 127.0.0.1:11434 to Ollama on Windows when the app is running there.
 ollama:
   host: http://127.0.0.1:11434
-  vision_model: qwen2.5vl:7b
+  vision_model: moondream:latest
   merge_model: llama3.2:3b
   timeout_seconds: 120
+  keep_alive_seconds: 0
 
 analysis:
-  mode: auto
+  # gaming = heuristic + Whisper only, no VLM (lightest; recommended on WSL).
+  mode: gaming
   window_seconds: 30
   prefilter_top_percent: 15
-  max_vlm_windows: 80
+  max_vlm_windows: 25
   heuristic_weights:
-    audio: 0.35
-    motion: 0.30
-    scene_density: 0.15
-    keywords: 0.20
+    audio: 0.40
+    motion: 0.35
+    scene_density: 0.0
+    keywords: 0.25
   hybrid_weights:
     heuristic: 0.4
     vlm: 0.6
   silence_rms_threshold: 0.02
   silence_motion_threshold: 0.05
+  scene_detection: false
+  scene_downscale_height: 360
+  scene_sample_fps: 4.0
 
 clip:
   pre_pad_seconds: 3
@@ -45,11 +53,25 @@ clip:
   dedupe_overlap_ratio: 0.5
 
 proxy:
-  # audio_only: no 720p re-encode; scenes/motion/VLM read the uploaded 1080p VOD.
+  # audio_only: extract WAV; motion/scenes sample source (no 720p transcode).
+  # Preview is served from the original via HTTP range (no full-VOD remux).
   video_mode: audio_only
   video_bitrate: 2M
   audio_sample_rate: 16000
   min_free_disk_multiplier: 2.0
+  make_preview: false
+
+cleanup:
+  min_gap_seconds: 0.35
+  pad_seconds: 0.05
+  use_silencedetect: true
+  silence_noise_db: -30
+  remove_fillers: true
+  use_llm: true
+  llm_model: llama3.2:3b
+  formats:
+    - youtube
+    - reels
 
 keywords:
   - "no way"

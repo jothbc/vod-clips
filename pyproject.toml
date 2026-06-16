@@ -36,6 +36,9 @@ dev = [
     "pytest-cov>=5.0",
     "httpx>=0.27",
 ]
+twitch = [
+    "yt-dlp>=2024.1",
+]
 
 [project.scripts]
 reels = "reels.cli:app"

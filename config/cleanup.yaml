@@ -1,0 +1,51 @@
+preset: cleanup
+
+# Clean-video feature: cut silences between speech and LLM-detected mistakes,
+# then render a single corrected video for YouTube (16:9) and Reels/TikTok (9:16).
+
+hardware:
+  whisper_device: cuda
+  whisper_model: medium
+  whisper_compute_type: float16
+  ffmpeg_video_encoder: h264_nvenc
+  proxy_height: 720
+  motion_sample_height: 480
+  max_workers: 2
+  ffmpeg_threads: 6
+  opencv_threads: 2
+  whisper_chunk_minutes: 10
+
+ollama:
+  host: http://127.0.0.1:11434
+  # Light vision model (~1.7 GB). Avoid qwen2.5vl:7b on 12 GB GPUs.
+  vision_model: moondream:latest
+  merge_model: llama3.2:3b
+  timeout_seconds: 180
+  keep_alive_seconds: 0
+
+analysis:
+  mode: gaming
+  scene_detection: false
+
+proxy:
+  video_mode: audio_only
+  audio_sample_rate: 16000
+  min_free_disk_multiplier: 1.5
+  make_preview: false
+
+cleanup:
+  min_gap_seconds: 0.35
+  pad_seconds: 0.05
+  use_silencedetect: true
+  silence_noise_db: -30
+  remove_fillers: true
+  use_llm: true
+  llm_model: llama3.2:3b
+  formats:
+    - youtube
+    - reels
+
+keywords: []
+
+paths:
+  prompts_dir: prompts

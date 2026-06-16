@@ -1,123 +1,132 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  createJob,
-  fetchClips,
-  fetchHealth,
-  getJob,
-  subscribeJobEvents,
-  type ClipItem,
-  type JobState,
-} from "./api/client";
-import ClipsGallery from "./components/ClipsGallery";
-import CleanupPanel from "./components/CleanupPanel";
-import JobForm, { type JobFormValues } from "./components/JobForm";
-import ProgressPanel from "./components/ProgressPanel";
+import { waitForApi } from "./api/base";
+import { fetchFeatures, fetchHealth, type FeatureInfo } from "./api/client";
+import FeatureSelector from "./components/FeatureSelector";
+import CaptionsView from "./features/CaptionsView";
+import CleanupView from "./features/CleanupView";
+import PublishView from "./features/PublishView";
+import ReelsLibraryView from "./features/ReelsLibraryView";
+import ReelsView from "./features/ReelsView";
+import TwitchDownloadView, { PENDING_VOD_KEY } from "./features/TwitchDownloadView";
 
-const defaultForm: JobFormValues = {
-  videoPath: "",
-  mode: "auto",
-  preset: "twitch_gaming",
-  maxClips: 15,
-  useNvenc: true,
-  cleanup: false,
-  resume: false,
-};
+const FALLBACK_FEATURES: FeatureInfo[] = [
+  {
+    id: "reels",
+    label: "Gerar Reels",
+    description: "Analisa o vídeo e lista os highlights para você escolher antes de gerar os clipes.",
+    enabled: true,
+  },
+  {
+    id: "cleanup",
+    label: "Limpar vídeo",
+    description:
+      "Corta silêncios entre as falas e erros detectados por IA, gerando um único vídeo corrigido.",
+    enabled: true,
+  },
+  {
+    id: "twitch_download",
+    label: "Baixar da Twitch",
+    description: "Baixe vários VODs em paralelo para temp/vods e use depois em Reels ou Limpar vídeo.",
+    enabled: true,
+  },
+  {
+    id: "reels_library",
+    label: "Reels gerados",
+    description: "Veja, reproduza e baixe todos os clipes exportados, de qualquer sessão anterior.",
+    enabled: true,
+  },
+  {
+    id: "captions",
+    label: "Adicionar legendas",
+    description: "Legendas estilo Reels/TikTok com texto editável antes de gerar.",
+    enabled: true,
+  },
+  {
+    id: "publish",
+    label: "Metadados para publicar",
+    description: "Gera título, descrição, tags e thumbnail para YouTube ou Short-form.",
+    enabled: true,
+  },
+];
 
 export default function App() {
-  const [form, setForm] = useState<JobFormValues>(defaultForm);
-  const [job, setJob] = useState<JobState | null>(null);
-  const [clips, setClips] = useState<ClipItem[]>([]);
-  const [outputDir, setOutputDir] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [health, setHealth] = useState<{ ffmpeg: boolean; ollama: boolean } | null>(null);
-  const [cleared, setCleared] = useState(false);
-
-  const running = job?.status === "running" || job?.status === "queued";
+  const [apiReady, setApiReady] = useState(false);
+  const [health, setHealth] = useState<{ ffmpeg: boolean; ollama: boolean; yt_dlp?: boolean } | null>(
+    null
+  );
+  const [features, setFeatures] = useState<FeatureInfo[]>(FALLBACK_FEATURES);
+  const [feature, setFeature] = useState("reels");
+  const [pendingVodPath, setPendingVodPath] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchHealth().then(setHealth).catch(() => setHealth(null));
-  }, []);
-
-  const loadClips = useCallback(async (jobId: string) => {
-    try {
-      const data = await fetchClips(jobId);
-      setClips(data.clips);
-      setOutputDir(data.output_dir);
-    } catch {
-      /* not ready yet */
-    }
-  }, []);
-
-  const startJob = async () => {
-    setError(null);
-    setClips([]);
-    setCleared(false);
-    try {
-      const { job_id } = await createJob({
-        video_path: form.videoPath.trim(),
-        preset: form.preset,
-        mode: form.mode,
-        max_clips: form.maxClips,
-        use_nvenc: form.useNvenc,
-        cleanup: form.cleanup,
-        resume: form.resume,
-      });
-
-      const initial = await getJob(job_id);
-      setJob(initial);
-
-      const unsub = subscribeJobEvents(
-        job_id,
-        (state) => {
-          setJob(state);
-          if (state.status === "completed") {
-            loadClips(job_id);
-          }
-        },
-        () => {
-          getJob(job_id).then(setJob).catch(() => {});
+    let cancelled = false;
+    (async () => {
+      try {
+        await waitForApi();
+        if (cancelled) return;
+        setApiReady(true);
+        const [h, f] = await Promise.all([
+          fetchHealth().catch(() => null),
+          fetchFeatures().catch(() => FALLBACK_FEATURES),
+        ]);
+        if (cancelled) return;
+        setHealth(h);
+        if (f && f.length) setFeatures(f);
+      } catch {
+        if (!cancelled) {
+          setApiReady(false);
+          setHealth(null);
         }
-      );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-      return () => unsub();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+  const navigateWithVod = useCallback((target: "reels" | "cleanup", path: string) => {
+    localStorage.setItem(PENDING_VOD_KEY, path);
+    setPendingVodPath(path);
+    setFeature(target);
+  }, []);
+
+  const consumePendingVod = useCallback(() => {
+    const path = pendingVodPath ?? localStorage.getItem(PENDING_VOD_KEY);
+    if (path) {
+      localStorage.removeItem(PENDING_VOD_KEY);
+      setPendingVodPath(null);
     }
-  };
+    return path;
+  }, [pendingVodPath]);
 
   return (
     <>
       <h1>Reels</h1>
-      <p className="subtitle">Twitch VOD → YouTube + Instagram Reels (100% local)</p>
+      <p className="subtitle">
+        Estúdio local de vídeo (100% offline) — escolha o que deseja fazer.
+      </p>
 
-      {error && <p className="error">{error}</p>}
+      <FeatureSelector features={features} active={feature} onSelect={setFeature} />
 
-      <JobForm
-        values={form}
-        onChange={setForm}
-        onSubmit={startJob}
-        disabled={!!running}
-        health={health}
-      />
-
-      <ProgressPanel job={job} />
-
-      {job && (job.status === "completed" || job.status === "failed") && (
-        <>
-          {job.status === "completed" && !cleared && (
-            <ClipsGallery clips={clips} outputDir={outputDir || job.output_dir} />
-          )}
-          <CleanupPanel
-            jobId={job.id}
-            disabled={running}
-            onCleared={() => {
-              setCleared(true);
-              setClips([]);
-              setForm((f) => ({ ...f, videoPath: "" }));
-            }}
-          />
-        </>
+      {feature === "reels" && (
+        <ReelsView
+          apiReady={apiReady}
+          health={health}
+          consumePendingVod={consumePendingVod}
+          onOpenLibrary={() => setFeature("reels_library")}
+        />
       )}
+      {feature === "reels_library" && <ReelsLibraryView apiReady={apiReady} />}
+      {feature === "cleanup" && (
+        <CleanupView apiReady={apiReady} health={health} consumePendingVod={consumePendingVod} />
+      )}
+      {feature === "twitch_download" && (
+        <TwitchDownloadView apiReady={apiReady} health={health} onUseVod={navigateWithVod} />
+      )}
+      {feature === "captions" && (
+        <CaptionsView apiReady={apiReady} health={health} consumePendingVod={consumePendingVod} />
+      )}
+      {feature === "publish" && <PublishView apiReady={apiReady} health={health} />}
     </>
   );
 }

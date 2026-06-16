@@ -4,6 +4,30 @@ Documento de referência: o que o pipeline faz, o que cada fase consome no PC, e
 
 ---
 
+## 0. Atualização: features plugáveis e estabilidade (WSL)
+
+O projeto agora é organizado em **features** selecionáveis na UI (`src/reels/features/`,
+despachadas pelo `JobManager`):
+
+- **Gerar Reels** — lista os highlights para revisão e só gera os clipes selecionados.
+  Agora roda **só com Whisper + heurísticas** (o **VLM foi removido** do caminho padrão,
+  era a principal causa de travamento no WSL).
+- **Limpar vídeo** — transcreve com timestamps por palavra, corta **silêncios** entre as
+  falas e **erros detectados por LLM** (`qwen2.5:14b`), você revisa a lista de cortes
+  (EDL) e então renderiza **um** vídeo corrigido em 16:9 (YouTube) e 9:16 (Reels/TikTok).
+- **Em breve** — placeholder para a próxima feature.
+
+Mitigações de travamento (ver [WSL.md](WSL.md)): sem remux do VOD inteiro
+(`proxy.make_preview: false`, original servido por HTTP range), detecção de cena
+**desligada por padrão** (`analysis.scene_detection: false`, e downscaled quando ligada),
+**Whisper em blocos** (`hardware.whisper_chunk_minutes`), **limite de threads**
+(`ffmpeg_threads`/`opencv_threads`) e **cancelamento** de upload/análise/export/render.
+
+O fluxo abaixo descreve a feature **Gerar Reels**; a fase `vlm` é opcional e fica
+desligada por padrão.
+
+---
+
 ## 1. O que é este projeto?
 
 O **Reels** é uma ferramenta **100% local** que:

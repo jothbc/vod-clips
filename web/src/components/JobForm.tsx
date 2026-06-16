@@ -9,41 +9,46 @@ export interface JobFormValues {
   useNvenc: boolean;
   cleanup: boolean;
   resume: boolean;
+  exportAllClips: boolean;
 }
 
 interface Props {
   values: JobFormValues;
   onChange: (v: JobFormValues) => void;
   onSubmit: () => void;
+  onNewVideo?: () => void;
+  onVideoChange?: (path: string) => void;
   disabled: boolean;
-  health: { ffmpeg: boolean; ollama: boolean } | null;
+  apiReady?: boolean;
+  health: { ffmpeg: boolean; ollama: boolean; yt_dlp?: boolean } | null;
 }
 
-export default function JobForm({ values, onChange, onSubmit, disabled, health }: Props) {
+export default function JobForm({
+  values,
+  onChange,
+  onSubmit,
+  onNewVideo,
+  onVideoChange,
+  disabled,
+  apiReady = true,
+  health,
+}: Props) {
   return (
     <div className="card">
       <FilePicker
         value={values.videoPath}
-        onChange={(videoPath) => onChange({ ...values, videoPath })}
+        onChange={(videoPath) => {
+          onChange({ ...values, videoPath });
+          onVideoChange?.(videoPath);
+        }}
+        onNewFile={onNewVideo}
         disabled={disabled}
+        apiReady={apiReady}
       />
 
       <div className="row" style={{ marginTop: "1rem" }}>
         <div>
-          <label htmlFor="mode">Analysis mode</label>
-          <select
-            id="mode"
-            value={values.mode}
-            onChange={(e) => onChange({ ...values, mode: e.target.value as AnalysisMode })}
-            disabled={disabled}
-          >
-            <option value="auto">auto (heuristic + VLM)</option>
-            <option value="gaming">gaming (heuristic only)</option>
-            <option value="multimodal">multimodal (VLM)</option>
-          </select>
-        </div>
-        <div>
-          <label htmlFor="max-clips">Max clips</label>
+          <label htmlFor="max-clips">Max highlights</label>
           <input
             id="max-clips"
             type="number"
@@ -69,31 +74,25 @@ export default function JobForm({ values, onChange, onSubmit, disabled, health }
         <label>
           <input
             type="checkbox"
-            checked={values.cleanup}
-            onChange={(e) => onChange({ ...values, cleanup: e.target.checked })}
+            checked={values.exportAllClips}
+            onChange={(e) => onChange({ ...values, exportAllClips: e.target.checked })}
             disabled={disabled}
           />
-          Cleanup proxy after run
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={values.resume}
-            onChange={(e) => onChange({ ...values, resume: e.target.checked })}
-            disabled={disabled}
-          />
-          Resume checkpoint
+          Export all clips immediately (skip review)
         </label>
       </div>
 
       {health && (
         <p className="subtitle" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
           ffmpeg: {health.ffmpeg ? "ok" : "missing"} · ollama: {health.ollama ? "ok" : "offline"}
+          {health.yt_dlp !== undefined && (
+            <> · yt-dlp: {health.yt_dlp ? "ok" : "missing"}</>
+          )}
         </p>
       )}
 
       <button type="button" className="primary" onClick={onSubmit} disabled={disabled || !values.videoPath.trim()}>
-        Start processing
+        {values.exportAllClips ? "Analyze and export all" : "Analyze video"}
       </button>
     </div>
   );

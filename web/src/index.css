@@ -64,6 +64,161 @@ select {
   gap: 1rem;
 }
 
+.export-resolution {
+  margin-bottom: 1rem;
+}
+
+.export-resolution-source {
+  font-size: 0.85rem;
+  color: #a0a0b8;
+  margin: 0 0 0.75rem;
+}
+
+button.secondary {
+  padding: 0.55rem 1rem;
+  background: transparent;
+  color: #c4b8ff;
+  border: 1px solid #3a3a50;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button.secondary:hover {
+  border-color: #5b4cdb;
+}
+
+.reels-library-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.reels-library-empty {
+  color: #8888a0;
+  margin: 1rem 0 0;
+}
+
+.reels-library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.reels-library-item {
+  border: 1px solid #2a2a3a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.reels-library-item-header {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  background: #14141e;
+}
+
+.reels-library-toggle {
+  flex: 1;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  background: transparent;
+  border: none;
+  color: #e8e8ec;
+  cursor: pointer;
+}
+
+.reels-library-toggle:hover {
+  background: #1a1a26;
+}
+
+.reels-library-toggle-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.reels-library-toggle-meta {
+  display: block;
+  font-size: 0.85rem;
+  color: #8888a0;
+}
+
+.reels-library-item-header .danger-button {
+  margin: 0.5rem 0.5rem 0.5rem 0;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.reels-library-expanded {
+  padding: 0 0.5rem 0.5rem;
+}
+
+.reels-library-expanded .card {
+  margin-bottom: 0;
+  border: none;
+  padding-top: 0.5rem;
+}
+
+.clip-download {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #8b6cf6;
+  text-decoration: none;
+}
+
+.clip-download:hover {
+  text-decoration: underline;
+}
+
+.captions-editor-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.captions-editor-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.captions-editor-time {
+  font-size: 0.85rem;
+  color: #8888a0;
+  padding-top: 0.55rem;
+}
+
+.captions-editor-row textarea {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #3a3a50;
+  background: #0e0e14;
+  color: #e8e8ec;
+  font-size: 0.95rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+@media (max-width: 640px) {
+  .captions-editor-row {
+    grid-template-columns: 1fr;
+  }
+  .captions-editor-time {
+    padding-top: 0;
+  }
+}
+
 @media (max-width: 640px) {
   .row {
     grid-template-columns: 1fr;
@@ -189,6 +344,32 @@ button.primary:disabled {
   aspect-ratio: 16/9;
   background: #000;
   display: block;
+}
+
+.clip-preview-placeholder {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #0e0e14;
+  border: 1px dashed #3a3a50;
+  border-radius: 0;
+  color: #c4b8ff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 1rem;
+}
+
+.clip-preview-placeholder:hover {
+  background: #1a1a26;
+  border-color: #5b4cdb;
+}
+
+.clip-card.reels .clip-preview-placeholder {
+  aspect-ratio: 9/16;
+  max-height: 360px;
 }
 
 .clip-card.reels video {
@@ -419,4 +600,284 @@ button.danger-button:disabled {
 .browse-item .size {
   font-size: 0.75rem;
   color: #8888a0;
+}
+
+/* Highlights review */
+.highlights-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.2fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .highlights-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.highlights-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.toolbar-sep {
+  color: #666680;
+}
+
+.toolbar-count {
+  margin-left: auto;
+  color: #8888a0;
+  font-size: 0.8rem;
+}
+
+.highlights-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.highlight-row {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.highlight-row:hover,
+.highlight-row.active {
+  background: #2a2a3a;
+  border-color: #3a3a50;
+}
+
+.highlight-row.active {
+  border-color: #5b4cdb;
+}
+
+.highlight-check {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 0.15rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.highlight-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.highlight-info strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.highlight-info span {
+  font-size: 0.78rem;
+  color: #8888a0;
+}
+
+.highlight-reason {
+  font-style: italic;
+}
+
+.stored-vods-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #2a2a3a;
+  border-radius: 6px;
+  background: #0e0e14;
+}
+
+.stored-vod-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #1a1a26;
+}
+
+.stored-vod-row:last-child {
+  border-bottom: none;
+}
+
+.stored-vod-row.active {
+  background: #221d3a;
+}
+
+.stored-vod-pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: transparent;
+  border: none;
+  color: #e8e8ec;
+  cursor: pointer;
+  padding: 0.2rem 0;
+  text-align: left;
+  min-width: 0;
+}
+
+.stored-vod-pick:hover:not(:disabled) {
+  color: #c4b8ff;
+}
+
+.stored-vod-pick strong {
+  font-size: 0.85rem;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stored-vod-pick span {
+  font-size: 0.72rem;
+  color: #8888a0;
+}
+
+.stored-vod-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.stored-vod-delete {
+  font-size: 0.78rem;
+  color: #f0a0a0;
+}
+
+.twitch-urls-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #3a3a50;
+  background: #0e0e14;
+  color: #e8e8ec;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  margin-top: 0.35rem;
+}
+
+.twitch-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.twitch-download-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.twitch-download-item {
+  border: 1px solid #2a2a3a;
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: #0e0e14;
+}
+
+.twitch-download-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.twitch-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stored-vod-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.source-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 6px;
+  display: block;
+}
+
+/* Feature selector */
+.feature-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.feature-card {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid #2a2a3a;
+  background: #1a1a26;
+  color: #e8e8ec;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.feature-card:hover:not(:disabled) {
+  border-color: #5b4cdb;
+}
+
+.feature-card.active {
+  border-color: #5b4cdb;
+  background: #221d3a;
+}
+
+.feature-card strong {
+  font-size: 1rem;
+}
+
+.feature-card span {
+  font-size: 0.82rem;
+  color: #8888a0;
+}
+
+.feature-card.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.feature-soon {
+  font-size: 0.7rem;
+  color: #c4b8ff;
+  font-style: normal;
+  align-self: flex-start;
+  border: 1px solid #3a3a50;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
 }

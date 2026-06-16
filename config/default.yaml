@@ -8,28 +8,41 @@ hardware:
   proxy_height: 720
   motion_sample_height: 480
   max_workers: 2
+  # Cap threads so heavy decode passes don't lock up WSL on long VODs (0 = auto).
+  ffmpeg_threads: 6
+  opencv_threads: 2
+  # Split Whisper into N-minute chunks to cap RAM and allow cancellation (0 = whole file).
+  whisper_chunk_minutes: 10
 
+# Ollama is only used by the optional VLM (disabled by default) and the
+# clean-video LLM step. Highlights now run on Whisper + heuristics only.
 ollama:
   host: http://127.0.0.1:11434
-  vision_model: qwen2.5vl:7b
+  vision_model: moondream:latest
   merge_model: llama3.2:3b
   timeout_seconds: 120
+  keep_alive_seconds: 0
 
 analysis:
-  mode: auto
+  # gaming = heuristic + Whisper only, no VLM (lightest; recommended on WSL).
+  mode: gaming
   window_seconds: 30
   prefilter_top_percent: 15
-  max_vlm_windows: 80
+  max_vlm_windows: 25
   heuristic_weights:
-    audio: 0.35
-    motion: 0.30
-    scene_density: 0.15
-    keywords: 0.20
+    audio: 0.40
+    motion: 0.35
+    scene_density: 0.0
+    keywords: 0.25
   hybrid_weights:
     heuristic: 0.4
     vlm: 0.6
   silence_rms_threshold: 0.02
   silence_motion_threshold: 0.05
+  # Scene detection full-decodes the VOD; off by default to avoid WSL freezes.
+  scene_detection: false
+  scene_downscale_height: 360
+  scene_sample_fps: 4.0
 
 clip:
   pre_pad_seconds: 3
@@ -47,6 +60,41 @@ proxy:
   video_bitrate: 2M
   audio_sample_rate: 16000
   min_free_disk_multiplier: 2.0
+  make_preview: false
+
+cleanup:
+  min_gap_seconds: 0.35
+  pad_seconds: 0.05
+  use_silencedetect: true
+  silence_noise_db: -30
+  remove_fillers: true
+  use_llm: true
+  llm_model: llama3.2:3b
+  formats:
+    - youtube
+    - reels
+
+captions:
+  max_words_per_line: 4
+  word_gap_seconds: 0.35
+  default_font: montserrat-bold
+  output_format: reels
+  bottom_margin_ratio: 0.15
+  font_size_ratio: 0.05
+  outline_size: 4
+  primary_colour: "#FFFFFF"
+  highlight_colour: "#FFE135"
+
+publish:
+  llm_model: llama3.2:3b
+  youtube_title_max: 100
+  short_title_max: 80
+  thumbnail_jpeg_quality: 90
+  default_font: montserrat-bold
+
+twitch_download:
+  max_concurrent: 2
+  skip_existing: true
 
 keywords: []
 

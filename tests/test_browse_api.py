@@ -14,12 +14,26 @@ from reels.storage import temp_outputs_dir, temp_vods_dir
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     import reels.storage as storage_mod
+    import reels.video_store as vs_mod
+    from reels.models import VideoInfo
 
     root = tmp_path / "proj"
     (root / "config").mkdir(parents=True)
     (root / "config" / "default.yaml").write_text("preset: default\n", encoding="utf-8")
 
     monkeypatch.setattr(storage_mod, "project_root", lambda: root)
+    monkeypatch.setattr(
+        vs_mod,
+        "probe_video",
+        lambda path: VideoInfo(
+            path=str(path),
+            duration=60.0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            size_bytes=path.stat().st_size if path.is_file() else 0,
+        ),
+    )
     return TestClient(create_app())
 
 
@@ -32,7 +46,8 @@ def test_upload_mp4_stream(client, tmp_path):
     data = r.json()
     assert data["size_bytes"] == 5000
     assert Path(data["path"]).exists()
-    assert str(temp_vods_dir()) in data["path"] or "vods" in data["path"]
+    assert "video" in data["path"]
+    assert data.get("video_id")
 
 
 def test_list_stored_vods_empty(client):
@@ -43,14 +58,11 @@ def test_list_stored_vods_empty(client):
     assert "vods" in data["dir"]
 
 
-def test_list_and_delete_stored_vod(client):
-    # Upload a file so temp/vods has something to list.
-    up = client.post(
-        "/api/upload",
-        files={"file": ("reuse.mp4", b"\x00" * 2048, "video/mp4")},
-    )
-    assert up.status_code == 200
-    stored_path = up.json()["path"]
+def test_list_and_delete_stored_vod(client, tmp_path):
+    # Legacy /api/vods lists temp/vods only — seed a file there directly.
+    vod = temp_vods_dir() / "legacy_test.mp4"
+    vod.write_bytes(b"\x00" * 2048)
+    stored_path = str(vod.resolve())
 
     listed = client.get("/api/vods")
     assert listed.status_code == 200
@@ -58,7 +70,7 @@ def test_list_and_delete_stored_vod(client):
     assert any(v["path"] == stored_path for v in items)
     item = next(v for v in items if v["path"] == stored_path)
     assert item["size_bytes"] == 2048
-    assert item["filename"].endswith("reuse.mp4")
+    assert item["filename"].endswith("legacy_test.mp4")
 
     # Delete by path.
     deleted = client.delete(f"/api/vods?path={stored_path}")

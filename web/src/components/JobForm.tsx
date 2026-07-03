@@ -1,5 +1,5 @@
 import type { AnalysisMode } from "../api/client";
-import FilePicker from "./FilePicker";
+import MediaSelectionField from "./MediaSelectionField";
 
 export interface JobFormValues {
   videoPath: string;
@@ -17,7 +17,6 @@ interface Props {
   onChange: (v: JobFormValues) => void;
   onSubmit: () => void;
   onNewVideo?: () => void;
-  onVideoChange?: (path: string) => void;
   disabled: boolean;
   apiReady?: boolean;
   health: { ffmpeg: boolean; ollama: boolean; yt_dlp?: boolean } | null;
@@ -28,23 +27,13 @@ export default function JobForm({
   onChange,
   onSubmit,
   onNewVideo,
-  onVideoChange,
   disabled,
   apiReady = true,
   health,
 }: Props) {
   return (
     <div className="card">
-      <FilePicker
-        value={values.videoPath}
-        onChange={(videoPath) => {
-          onChange({ ...values, videoPath });
-          onVideoChange?.(videoPath);
-        }}
-        onNewFile={onNewVideo}
-        disabled={disabled}
-        apiReady={apiReady}
-      />
+      <MediaSelectionField returnFeature="reels" disabled={disabled} onClear={onNewVideo} />
 
       <div className="row" style={{ marginTop: "1rem" }}>
         <div>
@@ -91,7 +80,12 @@ export default function JobForm({
         </p>
       )}
 
-      <button type="button" className="primary" onClick={onSubmit} disabled={disabled || !values.videoPath.trim()}>
+      <button
+        type="button"
+        className="primary"
+        onClick={onSubmit}
+        disabled={disabled || !values.videoPath.trim() || !apiReady}
+      >
         {values.exportAllClips ? "Analyze and export all" : "Analyze video"}
       </button>
     </div>

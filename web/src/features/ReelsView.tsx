@@ -14,13 +14,13 @@ import ExportResolutionPicker from "../components/ExportResolutionPicker";
 import HighlightsReview from "../components/HighlightsReview";
 import JobForm, { type JobFormValues } from "../components/JobForm";
 import ProgressPanel from "../components/ProgressPanel";
+import { useMediaSelection } from "../context/MediaSelectionContext";
 import { useJobController } from "../hooks/useJobController";
 
 interface Props {
   apiReady: boolean;
   health: { ffmpeg: boolean; ollama: boolean; yt_dlp?: boolean } | null;
-  consumePendingVod?: () => string | null;
-  onOpenLibrary?: () => void;
+  onOpenGallery?: () => void;
 }
 
 const defaultForm: JobFormValues = {
@@ -34,13 +34,15 @@ const defaultForm: JobFormValues = {
   exportAllClips: false,
 };
 
-export default function ReelsView({ apiReady, health, consumePendingVod, onOpenLibrary }: Props) {
+export default function ReelsView({ apiReady, health, onOpenGallery }: Props) {
+  const { selectedMedia, setSelectedMedia } = useMediaSelection();
   const [form, setForm] = useState<JobFormValues>(defaultForm);
 
   useEffect(() => {
-    const path = consumePendingVod?.();
-    if (path) setForm((f) => ({ ...f, videoPath: path }));
-  }, [consumePendingVod]);
+    const path = selectedMedia?.path ?? "";
+    setForm((f) => (f.videoPath === path ? f : { ...f, videoPath: path }));
+  }, [selectedMedia?.path]);
+
   const [highlights, setHighlights] = useState<HighlightItem[]>([]);
   const [sourceVideoUrl, setSourceVideoUrl] = useState("");
   const [previewWarning, setPreviewWarning] = useState<string | null>(null);
@@ -69,7 +71,6 @@ export default function ReelsView({ apiReady, health, consumePendingVod, onOpenL
       if (data.default_youtube) setYoutubeResolution(data.default_youtube);
       if (data.default_reels) setReelsResolution(data.default_reels);
       setSelected(new Set(data.highlights.map((h) => h.index)));
-      // Do not auto-select row 0: that would mount <video> and seek immediately on huge VODs.
       setActiveIndex(null);
       const sizeGb = (data.preview_size_bytes ?? 0) / 1e9;
       if (data.preview_is_full_source && sizeGb >= 2) {
@@ -173,8 +174,9 @@ export default function ReelsView({ apiReady, health, consumePendingVod, onOpenL
   const onNewVideoUpload = useCallback(() => {
     reset();
     resetUi();
-    setForm((f) => ({ ...f, resume: false }));
-  }, [reset, resetUi]);
+    setForm((f) => ({ ...f, resume: false, videoPath: "" }));
+    setSelectedMedia(null);
+  }, [reset, resetUi, setSelectedMedia]);
 
   return (
     <>
@@ -185,7 +187,6 @@ export default function ReelsView({ apiReady, health, consumePendingVod, onOpenL
         onChange={setForm}
         onSubmit={startJob}
         onNewVideo={onNewVideoUpload}
-        onVideoChange={(videoPath) => setForm((f) => ({ ...f, videoPath }))}
         disabled={!!running || exporting || !apiReady}
         apiReady={apiReady}
         health={health}
@@ -237,10 +238,10 @@ export default function ReelsView({ apiReady, health, consumePendingVod, onOpenL
       {showGallery && job && (
         <div>
           <ClipsGallery clips={clips} outputDir={outputDir || job.output_dir} />
-          {onOpenLibrary && (
+          {onOpenGallery && (
             <p style={{ marginTop: "0.75rem" }}>
-              <button type="button" className="secondary" onClick={onOpenLibrary}>
-                Ver na biblioteca de reels
+              <button type="button" className="secondary" onClick={onOpenGallery}>
+                Ver na galeria
               </button>
             </p>
           )}
@@ -255,6 +256,7 @@ export default function ReelsView({ apiReady, health, consumePendingVod, onOpenL
             reset();
             resetUi();
             setForm((f) => ({ ...f, videoPath: "" }));
+            setSelectedMedia(null);
           }}
         />
       )}

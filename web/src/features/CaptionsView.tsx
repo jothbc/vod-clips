@@ -12,14 +12,14 @@ import {
   type JobState,
 } from "../api/client";
 import CleanupPanel from "../components/CleanupPanel";
-import FilePicker from "../components/FilePicker";
+import MediaSelectionField from "../components/MediaSelectionField";
 import ProgressPanel from "../components/ProgressPanel";
+import { useMediaSelection } from "../context/MediaSelectionContext";
 import { useJobController } from "../hooks/useJobController";
 
 interface Props {
   apiReady: boolean;
   health: { ffmpeg: boolean; ollama: boolean; yt_dlp?: boolean } | null;
-  consumePendingVod?: () => string | null;
 }
 
 function fmtTime(sec: number): string {
@@ -28,8 +28,9 @@ function fmtTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function CaptionsView({ apiReady, health, consumePendingVod }: Props) {
-  const [videoPath, setVideoPath] = useState("");
+export default function CaptionsView({ apiReady, health }: Props) {
+  const { selectedMedia, setSelectedMedia } = useMediaSelection();
+  const videoPath = selectedMedia?.path ?? "";
   const [useNvenc, setUseNvenc] = useState(false);
   const [fonts, setFonts] = useState<CaptionFont[]>([]);
   const [fontId, setFontId] = useState("montserrat-bold");
@@ -38,11 +39,6 @@ export default function CaptionsView({ apiReady, health, consumePendingVod }: Pr
   const [rendering, setRendering] = useState(false);
   const [captionedUrl, setCaptionedUrl] = useState("");
   const [captionedFilename, setCaptionedFilename] = useState("captioned.mp4");
-
-  useEffect(() => {
-    const path = consumePendingVod?.();
-    if (path) setVideoPath(path);
-  }, [consumePendingVod]);
 
   useEffect(() => {
     if (!apiReady) return;
@@ -162,16 +158,14 @@ export default function CaptionsView({ apiReady, health, consumePendingVod }: Pr
       {error && <p className="error">{error}</p>}
 
       <div className="card">
-        <FilePicker
-          value={videoPath}
-          onChange={(path) => setVideoPath(path)}
-          onNewFile={() => {
+        <MediaSelectionField
+          returnFeature="captions"
+          disabled={!!running || rendering || !apiReady}
+          onClear={() => {
             reset();
             resetUi();
-            setVideoPath("");
+            setSelectedMedia(null);
           }}
-          disabled={!!running || rendering || !apiReady}
-          apiReady={apiReady}
         />
 
         {fonts.length > 0 && (
@@ -291,7 +285,7 @@ export default function CaptionsView({ apiReady, health, consumePendingVod }: Pr
           onCleared={() => {
             reset();
             resetUi();
-            setVideoPath("");
+            setSelectedMedia(null);
           }}
         />
       )}

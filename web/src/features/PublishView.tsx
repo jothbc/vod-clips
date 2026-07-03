@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { apiUrl } from "../api/base";
 import {
   fetchPublish,
@@ -8,8 +8,10 @@ import {
   type PublishResponse,
 } from "../api/client";
 import CleanupPanel from "../components/CleanupPanel";
+import MediaMultiSelectionField from "../components/MediaMultiSelectionField";
 import ProgressPanel from "../components/ProgressPanel";
-import VideoMultiPicker from "../components/VideoMultiPicker";
+import { useMediaSelection } from "../context/MediaSelectionContext";
+import { useMediaLibrary } from "../hooks/useMediaLibrary";
 import { useJobController } from "../hooks/useJobController";
 
 interface Props {
@@ -24,7 +26,9 @@ async function copyText(text: string) {
 }
 
 export default function PublishView({ apiReady, health }: Props) {
-  const [videoPaths, setVideoPaths] = useState<string[]>([]);
+  const { selectedMediaPaths } = useMediaSelection();
+  const { storedVods, pickableClips } = useMediaLibrary(apiReady);
+  const videoPaths = selectedMediaPaths;
   const [platform, setPlatform] = useState<Platform>("youtube");
   const [contentType, setContentType] = useState<PublishContentType>("game");
   const [gameName, setGameName] = useState("");
@@ -32,6 +36,20 @@ export default function PublishView({ apiReady, health }: Props) {
   const [channelInfo, setChannelInfo] = useState("");
   const [publish, setPublish] = useState<PublishResponse | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const pathLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const v of storedVods) labels[v.path] = v.filename;
+    for (const c of pickableClips) labels[c.path] = c.title;
+    return labels;
+  }, [storedVods, pickableClips]);
+
+  const pathSizes = useMemo(() => {
+    const sizes: Record<string, number> = {};
+    for (const v of storedVods) sizes[v.path] = v.size_bytes;
+    for (const c of pickableClips) sizes[c.path] = c.size_bytes;
+    return sizes;
+  }, [storedVods, pickableClips]);
 
   const loadPublish = useCallback(async (jobId: string) => {
     try {
@@ -84,11 +102,11 @@ export default function PublishView({ apiReady, health }: Props) {
 
   return (
     <>
-      <VideoMultiPicker
-        value={videoPaths}
-        onChange={setVideoPaths}
+      <MediaMultiSelectionField
+        returnFeature="publish"
+        labels={pathLabels}
+        sizes={pathSizes}
         disabled={running}
-        apiReady={apiReady}
       />
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -229,7 +247,9 @@ export default function PublishView({ apiReady, health }: Props) {
         </div>
       )}
 
-      {job?.status === "completed" && <CleanupPanel jobId={job.id} disabled={running} />}
+      {job?.status === "completed" && (
+        <CleanupPanel jobId={job.id} disabled={running} onCleared={() => reset()} />
+      )}
     </>
   );
 }

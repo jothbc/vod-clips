@@ -8,12 +8,24 @@ import {
   type TwitchDownloadState,
 } from "../api/client";
 
-/** Track parallel Twitch downloads with SSE + polling fallback. */
-export function useTwitchDownloadQueue(apiReady: boolean) {
+function isActiveTwitchDownload(status: string): boolean {
+  return status === "queued" || status === "downloading" || status === "running";
+}
+
+function isTerminalTwitchDownload(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+export function useTwitchDownloadQueue(
+  apiReady: boolean,
+  opts?: { onDownloadCompleted?: (state: TwitchDownloadState) => void },
+) {
   const [downloads, setDownloads] = useState<TwitchDownloadState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const unsubsRef = useRef<Map<string, () => void>>(new Map());
+
+  const onDownloadCompleted = opts?.onDownloadCompleted;
 
   const mergeDownload = useCallback((state: TwitchDownloadState) => {
     setDownloads((prev) => {
@@ -34,18 +46,26 @@ export function useTwitchDownloadQueue(apiReady: boolean) {
         downloadId,
         (state) => {
           mergeDownload(state);
-          if (["completed", "failed", "cancelled"].includes(state.status)) {
+          if (state.status === "completed") {
+            onDownloadCompleted?.(state);
+          }
+          if (isTerminalTwitchDownload(state.status)) {
             unsub();
             unsubsRef.current.delete(downloadId);
           }
         },
         () => {
-          getTwitchDownload(downloadId).then(mergeDownload).catch(() => {});
+          getTwitchDownload(downloadId).then((state) => {
+            mergeDownload(state);
+            if (state.status === "completed") {
+              onDownloadCompleted?.(state);
+            }
+          }).catch(() => {});
         }
       );
       unsubsRef.current.set(downloadId, unsub);
     },
-    [mergeDownload]
+    [mergeDownload, onDownloadCompleted],
   );
 
   const refresh = useCallback(async () => {
@@ -54,7 +74,7 @@ export function useTwitchDownloadQueue(apiReady: boolean) {
       const data = await fetchTwitchDownloads();
       setDownloads(data.downloads);
       for (const d of data.downloads) {
-        if (d.status === "queued" || d.status === "running") {
+        if (isActiveTwitchDownload(d.status)) {
           subscribeOne(d.id);
         }
       }
@@ -85,7 +105,9 @@ export function useTwitchDownloadQueue(apiReady: boolean) {
         const { downloads: started } = await startTwitchDownloadBatch(cleaned);
         for (const d of started) {
           mergeDownload(d);
-          if (d.status === "queued" || d.status === "running") {
+          if (d.status === "completed") {
+            onDownloadCompleted?.(d);
+          } else if (isActiveTwitchDownload(d.status)) {
             subscribeOne(d.id);
           }
         }
@@ -95,7 +117,7 @@ export function useTwitchDownloadQueue(apiReady: boolean) {
         setSubmitting(false);
       }
     },
-    [mergeDownload, subscribeOne]
+    [mergeDownload, subscribeOne, onDownloadCompleted]
   );
 
   const cancel = useCallback(

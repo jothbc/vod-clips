@@ -95,6 +95,8 @@ publish:
 twitch_download:
   max_concurrent: 2
   skip_existing: true
+  # HLS fragments fetched in parallel per VOD (yt-dlp --concurrent-fragments). Try 32–64 on fast links.
+  concurrent_fragments: 32
 
 keywords: []
 

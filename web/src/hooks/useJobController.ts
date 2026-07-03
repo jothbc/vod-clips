@@ -11,6 +11,7 @@ import {
 interface Options {
   onCompleted?: (job: JobState) => void;
   onFailed?: (job: JobState) => void;
+  onAwaitingReview?: (job: JobState) => void;
 }
 
 /** Shared create/subscribe/cancel lifecycle for a single running job. */
@@ -40,6 +41,9 @@ export function useJobController(opts: Options = {}) {
       if (state.status === "completed") {
         setStarting(false);
         optsRef.current.onCompleted?.(state);
+      } else if (state.status === "awaiting_review") {
+        setStarting(false);
+        optsRef.current.onAwaitingReview?.(state);
       } else if (state.status === "failed") {
         setStarting(false);
         optsRef.current.onFailed?.(state);

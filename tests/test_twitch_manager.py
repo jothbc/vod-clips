@@ -14,13 +14,11 @@ from reels.twitch.manager import TwitchDownloadManager, TwitchDownloadRequest
 
 @pytest.fixture
 def manager(monkeypatch, tmp_path):
-    import reels.storage as storage_mod
-    import reels.twitch.download as dl_mod
+    import reels.video_store as vs_mod
 
-    vods = tmp_path / "vods"
-    vods.mkdir()
-    monkeypatch.setattr(storage_mod, "temp_vods_dir", lambda: vods)
-    monkeypatch.setattr(dl_mod, "temp_vods_dir", lambda: vods)
+    video_root = tmp_path / "video"
+    video_root.mkdir(parents=True)
+    monkeypatch.setattr(vs_mod, "videos_root", lambda: video_root.resolve())
     return TwitchDownloadManager(max_concurrent=2, skip_existing=True)
 
 
@@ -32,10 +30,8 @@ def test_dedupe_returns_same_download(manager):
 
 
 def test_skip_existing_completes_without_download(manager):
-    import reels.storage as storage_mod
-
-    vods = storage_mod.temp_vods_dir()
-    dest = vod_output_path("2222222222", vods)
+    dest = vod_output_path("2222222222")
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(b"\x00" * 5000)
 
     state = manager.start(TwitchDownloadRequest(url="https://www.twitch.tv/videos/2222222222"))

@@ -7,14 +7,14 @@ $VenvReels = Join-Path $Root ".venv\Scripts\reels.exe"
 
 if (-not (Test-Path $VenvPy)) {
     Write-Error @"
-reels: missing .venv — create it once:
+reels: missing .venv - create it once:
   .\install.ps1
 "@
     exit 1
 }
 
 if (-not (Test-Path $VenvReels)) {
-    Write-Host "reels: installing package into .venv…" -ForegroundColor Yellow
+    Write-Host "reels: installing package into .venv..." -ForegroundColor Yellow
     & $VenvPy -m pip install -q -e ".[dev,cuda,twitch]"
 }
 

@@ -17,6 +17,8 @@ export interface JobState {
   error: string | null;
   highlight_count: number;
   clips_exported?: boolean;
+  result_clip_id?: string | null;
+  result_video_id?: string | null;
   log: string[];
 }
 

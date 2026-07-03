@@ -15,6 +15,10 @@ body {
 }
 
 #root {
+  min-height: 100vh;
+}
+
+.legacy-root {
   max-width: 1100px;
   margin: 0 auto;
   padding: 1.5rem;
@@ -817,6 +821,57 @@ button.danger-button:disabled {
   flex-wrap: wrap;
   gap: 0.35rem;
   align-items: center;
+}
+
+.gallery-pick-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  border: 1px solid var(--accent, #6366f1);
+}
+
+.gallery-pick-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.gallery-ingest,
+.gallery-section {
+  margin-bottom: 1rem;
+}
+
+.gallery-upload-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0.35rem;
+}
+
+.media-selection-field {
+  margin-bottom: 0.5rem;
+}
+
+.media-selection-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.media-selection-current {
+  margin-bottom: 0.25rem;
+}
+
+.media-multi-selection .stored-vod-row {
+  border: none;
+  padding: 0.35rem 0;
 }
 
 .source-preview {

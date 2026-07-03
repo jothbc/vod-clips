@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   fetchEdl,
   fetchFinal,
@@ -8,14 +8,14 @@ import {
   type JobState,
 } from "../api/client";
 import CleanupPanel from "../components/CleanupPanel";
-import FilePicker from "../components/FilePicker";
+import MediaSelectionField from "../components/MediaSelectionField";
 import ProgressPanel from "../components/ProgressPanel";
+import { useMediaSelection } from "../context/MediaSelectionContext";
 import { useJobController } from "../hooks/useJobController";
 
 interface Props {
   apiReady: boolean;
   health: { ffmpeg: boolean; ollama: boolean; yt_dlp?: boolean } | null;
-  consumePendingVod?: () => string | null;
 }
 
 function fmtTime(sec: number): string {
@@ -24,13 +24,9 @@ function fmtTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function CleanupView({ apiReady, health, consumePendingVod }: Props) {
-  const [videoPath, setVideoPath] = useState("");
-
-  useEffect(() => {
-    const path = consumePendingVod?.();
-    if (path) setVideoPath(path);
-  }, [consumePendingVod]);
+export default function CleanupView({ apiReady, health }: Props) {
+  const { selectedMedia, setSelectedMedia } = useMediaSelection();
+  const videoPath = selectedMedia?.path ?? "";
   const [useNvenc, setUseNvenc] = useState(true);
   const [edl, setEdl] = useState<EdlResponse | null>(null);
   const [cutSet, setCutSet] = useState<Set<number>>(new Set());
@@ -141,16 +137,14 @@ export default function CleanupView({ apiReady, health, consumePendingVod }: Pro
       {error && <p className="error">{error}</p>}
 
       <div className="card">
-        <FilePicker
-          value={videoPath}
-          onChange={(path) => setVideoPath(path)}
-          onNewFile={() => {
+        <MediaSelectionField
+          returnFeature="cleanup"
+          disabled={!!running || rendering || !apiReady}
+          onClear={() => {
             reset();
             resetUi();
-            setVideoPath("");
+            setSelectedMedia(null);
           }}
-          disabled={!!running || rendering || !apiReady}
-          apiReady={apiReady}
         />
         <div className="check-row">
           <label>
@@ -261,7 +255,7 @@ export default function CleanupView({ apiReady, health, consumePendingVod }: Pro
           onCleared={() => {
             reset();
             resetUi();
-            setVideoPath("");
+            setSelectedMedia(null);
           }}
         />
       )}

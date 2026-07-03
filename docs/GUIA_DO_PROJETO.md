@@ -6,9 +6,12 @@ Documento de referência: o que o pipeline faz, o que cada fase consome no PC, e
 
 ## 0. Atualização: features plugáveis e estabilidade (WSL)
 
-O projeto agora é organizado em **features** selecionáveis na UI (`src/reels/features/`,
+O projeto agora é organizado em **features** selecionáveis na UI (`web/src/features/`,
 despachadas pelo `JobManager`):
 
+- **Galeria** — hub central: upload de MP4, fila de downloads da Twitch (2 URLs em paralelo,
+  fragmentos HLS concorrentes via yt-dlp), listagem de VODs e clipes exportados. Todas as
+  outras abas selecionam vídeo a partir da galeria.
 - **Gerar Reels** — lista os highlights para revisão e só gera os clipes selecionados.
   Agora roda **só com Whisper + heurísticas** (o **VLM foi removido** do caminho padrão,
   era a principal causa de travamento no WSL).

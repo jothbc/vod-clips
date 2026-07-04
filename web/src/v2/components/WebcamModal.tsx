@@ -32,7 +32,10 @@ function defaultBox(w: number, h: number): Bbox {
 }
 
 function clampBox(box: Bbox, w: number, h: number): Bbox {
-  let { x1, y1, x2, y2 } = box;
+  let x1 = Math.round(box.x1);
+  let y1 = Math.round(box.y1);
+  let x2 = Math.round(box.x2);
+  let y2 = Math.round(box.y2);
   x1 = Math.max(0, Math.min(x1, w - MIN_SIZE));
   y1 = Math.max(0, Math.min(y1, h - MIN_SIZE));
   x2 = Math.max(x1 + MIN_SIZE, Math.min(x2, w));
@@ -40,9 +43,25 @@ function clampBox(box: Bbox, w: number, h: number): Bbox {
   return { x1, y1, x2, y2 };
 }
 
+function scaleBbox(box: Bbox, fromW: number, fromH: number, toW: number, toH: number): Bbox {
+  if (fromW <= 0 || fromH <= 0 || (fromW === toW && fromH === toH)) {
+    return box;
+  }
+  return clampBox(
+    {
+      x1: (box.x1 * toW) / fromW,
+      y1: (box.y1 * toH) / fromH,
+      x2: (box.x2 * toW) / fromW,
+      y2: (box.y2 * toH) / fromH,
+    },
+    toW,
+    toH
+  );
+}
+
 export default function WebcamModal({ video, playerRef, onClose, onSaved }: Props) {
-  const vw = video.width || 1920;
-  const vh = video.height || 1080;
+  const vw = video.desktop_frame_width || video.width || 1920;
+  const vh = video.desktop_frame_height || video.height || 1080;
   const [frameAt, setFrameAt] = useState(() => {
     const saved = video.webcam_region?.frame_at;
     if (saved && saved > 0) return saved;
@@ -53,8 +72,18 @@ export default function WebcamModal({ video, playerRef, onClose, onSaved }: Prop
   const [frameKey, setFrameKey] = useState(0);
   const [box, setBox] = useState<Bbox>(() => {
     const r = video.webcam_region;
-    if (r) return { x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 };
-    return defaultBox(vw, vh);
+    const fw = video.desktop_frame_width || video.width || 1920;
+    const fh = video.desktop_frame_height || video.height || 1080;
+    if (r) {
+      return scaleBbox(
+        { x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 },
+        r.source_width || fw,
+        r.source_height || fh,
+        fw,
+        fh
+      );
+    }
+    return defaultBox(fw, fh);
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,8 +97,20 @@ export default function WebcamModal({ video, playerRef, onClose, onSaved }: Prop
 
   useEffect(() => {
     const r = video.webcam_region;
-    if (r) setBox({ x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 });
-  }, [video.webcam_region]);
+    const fw = video.desktop_frame_width || video.width || 1920;
+    const fh = video.desktop_frame_height || video.height || 1080;
+    if (r) {
+      setBox(
+        scaleBbox(
+          { x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 },
+          r.source_width || fw,
+          r.source_height || fh,
+          fw,
+          fh
+        )
+      );
+    }
+  }, [video.webcam_region, video.desktop_frame_width, video.desktop_frame_height, video.width, video.height]);
 
   const layout = useCallback(() => {
     const stage = stageRef.current;
@@ -141,7 +182,13 @@ export default function WebcamModal({ video, playerRef, onClose, onSaved }: Prop
     setSaving(true);
     setError(null);
     try {
-      await saveWebcamRegion(video.id, { ...box, frame_at: frameAt });
+      await saveWebcamRegion(video.id, {
+        x1: Math.round(box.x1),
+        y1: Math.round(box.y1),
+        x2: Math.round(box.x2),
+        y2: Math.round(box.y2),
+        frame_at: frameAt,
+      });
       onSaved();
       onClose();
     } catch (e) {
@@ -225,6 +272,9 @@ export default function WebcamModal({ video, playerRef, onClose, onSaved }: Prop
           </div>
 
           <div className="v2-webcam-readout" aria-live="polite">
+            <span>
+              frame {vw}×{vh}
+            </span>
             <span>x1 {Math.round(box.x1)}</span>
             <span>y1 {Math.round(box.y1)}</span>
             <span>x2 {Math.round(box.x2)}</span>

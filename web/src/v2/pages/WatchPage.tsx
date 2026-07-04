@@ -237,7 +237,10 @@ export default function WatchPage() {
               onOpenCaptions={() => setCaptionsModalOpen(true)}
               onOpenCleanup={() => setCleanupModalOpen(true)}
               onOpenPublish={() => setPublishModalOpen(true)}
-              onOpenWebcam={() => setWebcamModalOpen(true)}
+              onOpenWebcam={() => {
+                void refresh();
+                setWebcamModalOpen(true);
+              }}
               canWebcam={canWebcam}
               trimMode={trimMode}
               onToggleTrim={() => setTrimMode((v) => !v)}

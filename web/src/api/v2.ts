@@ -43,6 +43,8 @@ export interface VideoDetail extends VideoSummary {
   webcam_region_resolved?: WebcamRegion | null;
   webcam_eligible?: boolean;
   has_webcam_region?: boolean;
+  desktop_frame_width?: number;
+  desktop_frame_height?: number;
 }
 
 export interface WebcamRegion {

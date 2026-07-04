@@ -548,18 +548,31 @@ def validate_webcam_region(
 ) -> WebcamRegion:
     if width <= 0 or height <= 0:
         raise ValueError("Invalid source dimensions")
-    x1 = region.x1 - (region.x1 % 2)
-    y1 = region.y1 - (region.y1 % 2)
-    x2 = region.x2 - (region.x2 % 2)
-    y2 = region.y2 - (region.y2 % 2)
+    min_size = 8
+    x1 = max(0, min(int(round(region.x1)), width - min_size))
+    y1 = max(0, min(int(round(region.y1)), height - min_size))
+    x2 = max(x1 + min_size, min(int(round(region.x2)), width))
+    y2 = max(y1 + min_size, min(int(round(region.y2)), height))
+    x1 = x1 - (x1 % 2)
+    y1 = y1 - (y1 % 2)
+    x2 = x2 - (x2 % 2)
+    y2 = y2 - (y2 % 2)
     if x2 <= x1:
-        x2 = min(width, x1 + 2)
+        x2 = min(width, x1 + min_size)
+        if x2 % 2:
+            x2 -= 1
     if y2 <= y1:
-        y2 = min(height, y1 + 2)
-    if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
-        raise ValueError("Region must be inside the frame with x1<x2 and y1<y2")
+        y2 = min(height, y1 + min_size)
+        if y2 % 2:
+            y2 -= 1
+    if x2 > width:
+        x2 = width - (width % 2)
+    if y2 > height:
+        y2 = height - (height % 2)
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("Region is too small for this frame")
     cw, ch = x2 - x1, y2 - y1
-    if cw < 8 or ch < 8:
+    if cw < min_size or ch < min_size:
         raise ValueError("Region is too small")
     return WebcamRegion(
         x1=x1,

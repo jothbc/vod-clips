@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from reels.caption_fonts import list_caption_fonts
 from reels.cleanup import load_edl
@@ -314,6 +314,13 @@ class WebcamRegionBody(BaseModel):
     y2: int
     frame_at: float = 0.0
 
+    @field_validator("x1", "y1", "x2", "y2", mode="before")
+    @classmethod
+    def _coerce_bbox_int(cls, v: object) -> int:
+        if isinstance(v, bool):
+            raise ValueError("invalid coordinate")
+        return int(round(float(v)))
+
 
 class PublishJobBody(BaseModel):
     platform: Literal["youtube", "short_form"] = "youtube"
@@ -361,11 +368,23 @@ def _publish_job_response(job_id: str) -> dict:
 def _webcam_fields(video_id: str) -> dict[str, Any]:
     own = get_own_webcam_region(video_id)
     resolved = resolve_webcam_region(video_id)
+    eligible = is_webcam_eligible(video_id)
+    frame_w = 0
+    frame_h = 0
+    if eligible:
+        try:
+            info = probe_video(desktop_frame_path(video_id))
+            frame_w = int(info.width)
+            frame_h = int(info.height)
+        except Exception:
+            pass
     return {
         "webcam_region": own.model_dump() if own else None,
         "webcam_region_resolved": resolved.model_dump() if resolved else None,
-        "webcam_eligible": is_webcam_eligible(video_id),
+        "webcam_eligible": eligible,
         "has_webcam_region": resolved is not None,
+        "desktop_frame_width": frame_w,
+        "desktop_frame_height": frame_h,
     }
 
 

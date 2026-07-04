@@ -147,6 +147,40 @@ def test_resolve_webcam_region_falls_back_to_parent(client, monkeypatch):
     assert resolved.x2 == 200
 
 
+def test_put_webcam_accepts_fractional_coords(client, monkeypatch):
+    slug = "vod_frac"
+    _seed_landscape_vod(slug)
+    monkeypatch.setattr(
+        "reels.video_store.probe_video",
+        lambda _p: type("I", (), {"duration": 120.0, "width": 1920, "height": 1080})(),
+    )
+    r = client.put(
+        f"/api/v2/videos/{slug}/webcam-region",
+        json={"x1": 100.7, "y1": 50.2, "x2": 400.9, "y2": 300.1},
+    )
+    assert r.status_code == 200
+    data = r.json()["webcam_region"]
+    assert all(isinstance(data[k], int) for k in ("x1", "y1", "x2", "y2"))
+    assert data["x2"] > data["x1"]
+
+
+def test_put_webcam_clamps_coords_outside_frame(client, monkeypatch):
+    slug = "vod_clamp"
+    _seed_landscape_vod(slug)
+    monkeypatch.setattr(
+        "reels.video_store.probe_video",
+        lambda _p: type("I", (), {"duration": 120.0, "width": 1680, "height": 1050})(),
+    )
+    r = client.put(
+        f"/api/v2/videos/{slug}/webcam-region",
+        json={"x1": 1457, "y1": 21, "x2": 1896, "y2": 175},
+    )
+    assert r.status_code == 200
+    data = r.json()["webcam_region"]
+    assert data["x2"] <= 1680
+    assert data["x2"] > data["x1"]
+
+
 def test_put_webcam_rejects_portrait_vod(client):
     slug = "vod_portrait"
     vs.original_dir(slug).mkdir(parents=True)

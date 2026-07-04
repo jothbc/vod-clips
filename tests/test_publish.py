@@ -21,6 +21,7 @@ from reels.publish import (
     load_publish,
     parse_publish_context,
     slug_from_path,
+    suggest_publish_field,
     write_publish,
 )
 from reels.thumbnail import target_dimensions, wrap_title_lines
@@ -96,6 +97,20 @@ def test_generate_metadata_uses_short_form_prompt():
     prompt = client.chat_text.call_args[0][0]
     assert "pt-br" in prompt.lower()
     assert "shorts" in prompt.lower()
+
+
+def test_suggest_publish_field_title_only():
+    config = load_config()
+    info = VideoInfo(path="/tmp/v.mp4", duration=120.0, width=1920, height=1080, fps=30.0)
+    segments = [{"text": "Clutch no final da partida"}]
+    client = MagicMock()
+    client.is_available.return_value = True
+    client.chat_text.return_value = json.dumps({"title": "Clutch Insano"})
+    result = suggest_publish_field(
+        "title", client=client, config=config, segments=segments, platform="youtube", info=info
+    )
+    assert result["title"] == "Clutch Insano"
+    assert "title" in client.chat_text.call_args[0][0].lower()
 
 
 def test_parse_publish_context_game():

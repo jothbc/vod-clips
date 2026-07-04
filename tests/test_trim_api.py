@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from reels.api.app import create_app
+from reels.jobs import JobManager, JobState, JobStatus
 from reels.models import VideoMetadata
 from reels.trim import validate_keep_spans
+import reels.jobs as jobs_mod
 import reels.video_store as vs
 
 
@@ -180,3 +184,93 @@ def test_register_trim_as_vod(tmp_path, monkeypatch):
     assert vod_id == meta.slug
     assert vod_id.startswith("vod_x_recorte")
     assert vs.source_path(vod_id).is_file()
+
+
+def test_finalize_trim_new_clip(tmp_path, monkeypatch):
+    import reels.storage as storage_mod
+
+    root = tmp_path / "proj"
+    monkeypatch.setattr(storage_mod, "project_root", lambda: root)
+    monkeypatch.setattr(vs, "videos_root", lambda: tmp_path / "video")
+    vs.videos_root().mkdir(parents=True)
+
+    slug = "vod_clip_trim"
+    vs.original_dir(slug).mkdir(parents=True)
+    vs.source_path(slug).write_bytes(b"\x00" * 100)
+    vs.save_metadata(
+        VideoMetadata(slug=slug, title="Trim VOD", kind="original", duration=120.0, size_bytes=100)
+    )
+
+    trim_path = tmp_path / "trimmed.mp4"
+    trim_path.write_bytes(b"\x00" * 150)
+    out = tmp_path / "out"
+    out.mkdir()
+    ctx = {
+        "source_video_id": slug,
+        "keep_spans": [[0, 10], [20, 30]],
+        "trim_output_path": str(trim_path),
+    }
+    (out / "v2_job_context.json").write_text(json.dumps(ctx), encoding="utf-8")
+
+    jobs_mod._manager = JobManager()
+    mgr = jobs_mod.get_job_manager()
+    job_id = "trim-new-clip"
+    mgr._jobs[job_id] = JobState(
+        id=job_id,
+        status=JobStatus.COMPLETED,
+        video_path=str(vs.source_path(slug)),
+        output_dir=str(out),
+        feature="v2_trim",
+        trim_output_path=str(trim_path),
+    )
+
+    result = mgr.finalize_v2_trim(job_id, "new_clip")
+    assert result["mode"] == "new_clip"
+    clip_id = result["video_id"]
+    assert "::" in clip_id
+    meta = vs.resolve_video_id(clip_id)
+    assert meta.kind == "clip"
+    assert meta.parent_slug == slug
+    assert meta.end == 20.0
+    clip_dir = vs.clip_dir(slug, meta.clip_slug or "")
+    assert (clip_dir / "youtube.mp4").is_file()
+
+
+def test_finalize_trim_rejects_duplicate(client, monkeypatch, tmp_path):
+    import reels.storage as storage_mod
+
+    root = tmp_path / "proj"
+    monkeypatch.setattr(storage_mod, "project_root", lambda: root)
+    monkeypatch.setattr(vs, "videos_root", lambda: tmp_path / "video")
+    vs.videos_root().mkdir(parents=True, exist_ok=True)
+
+    slug = "vod_dup"
+    vs.original_dir(slug).mkdir(parents=True)
+    vs.source_path(slug).write_bytes(b"\x00" * 100)
+    vs.save_metadata(
+        VideoMetadata(slug=slug, title="Dup", kind="original", duration=60.0, size_bytes=100)
+    )
+    trim_path = tmp_path / "trimmed.mp4"
+    trim_path.write_bytes(b"\x00" * 120)
+    out = tmp_path / "out_dup"
+    out.mkdir()
+    (out / "v2_job_context.json").write_text(
+        json.dumps({"source_video_id": slug, "keep_spans": [[0, 5]], "trim_output_path": str(trim_path)}),
+        encoding="utf-8",
+    )
+
+    jobs_mod._manager = JobManager()
+    mgr = jobs_mod.get_job_manager()
+    job_id = "trim-dup"
+    mgr._jobs[job_id] = JobState(
+        id=job_id,
+        status=JobStatus.COMPLETED,
+        video_path=str(vs.source_path(slug)),
+        output_dir=str(out),
+        feature="v2_trim",
+        trim_output_path=str(trim_path),
+        trim_finalized=True,
+    )
+
+    r = client.post(f"/api/v2/jobs/{job_id}/trim/finalize", json={"mode": "new_clip"})
+    assert r.status_code == 400

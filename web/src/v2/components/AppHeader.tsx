@@ -61,6 +61,9 @@ export default function AppHeader({ onOpenGallery }: Props) {
             Galeria
           </button>
         )}
+        <Link to="/publish/wallet" className="v2-btn v2-btn--ghost">
+          Carteira
+        </Link>
         <Link to="/old" className="v2-btn v2-btn--ghost">
           UI legada
         </Link>

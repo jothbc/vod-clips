@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from reels.config import AppConfig, ExportProfile, ExportProfiles, load_export_profiles
-from reels.models import Highlight, HighlightsDocument
+from reels.models import Highlight, HighlightsDocument, WebcamRegion
 from reels.progress import ProgressReporter
 
 
@@ -90,6 +90,129 @@ def build_scale_filter(
     if target_h % 2:
         target_h -= 1
     return f"scale={target_w}:{target_h}"
+
+
+def _even(n: int) -> int:
+    return max(2, n - (n % 2))
+
+
+def compute_reels_webcam_layout(
+    source_width: int,
+    source_height: int,
+    out_width: int,
+    out_height: int,
+    region: WebcamRegion,
+    *,
+    max_webcam_height_ratio: float = 0.45,
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
+    """Return cam crop, cam out size, main crop, main out size (all even)."""
+    x1, y1, x2, y2 = region.x1, region.y1, region.x2, region.y2
+    cam_w = _even(x2 - x1)
+    cam_h = _even(y2 - y1)
+    out_w = _even(out_width)
+    out_h = _even(out_height)
+    h_cam = _even(int(out_w * cam_h / max(1, cam_w)))
+    max_h_cam = _even(int(out_h * max_webcam_height_ratio))
+    if h_cam > max_h_cam:
+        h_cam = max_h_cam
+    h_main = _even(out_h - h_cam)
+    if h_main < 32:
+        raise ExportError("Webcam region leaves too little space for gameplay")
+
+    ar = out_w / h_main
+    if source_width / source_height > ar:
+        main_crop_h = _even(source_height)
+        main_crop_w = _even(int(main_crop_h * ar))
+    else:
+        main_crop_w = _even(source_width)
+        main_crop_h = _even(int(main_crop_w / ar))
+    main_x = max(0, (source_width - main_crop_w) // 2)
+    main_y = max(0, (source_height - main_crop_h) // 2)
+    return x1, y1, cam_w, cam_h, main_crop_w, main_crop_h, main_x, main_y, out_w, h_cam, h_main
+
+
+def build_reels_webcam_filter_complex(
+    source_width: int,
+    source_height: int,
+    out_width: int,
+    out_height: int,
+    region: WebcamRegion,
+) -> str:
+    """Stack webcam strip on top of center-cropped gameplay for 9:16 output."""
+    x1, y1, cw, ch, mw, mh, mx, my, out_w, h_cam, h_main = compute_reels_webcam_layout(
+        source_width, source_height, out_width, out_height, region
+    )
+    return (
+        f"[0:v]crop={cw}:{ch}:{x1}:{y1},scale={out_w}:{h_cam}[cam];"
+        f"[0:v]crop={mw}:{mh}:{mx}:{my},scale={out_w}:{h_main}:force_original_aspect_ratio=increase,"
+        f"crop={out_w}:{h_main}[main];"
+        f"[cam][main]vstack=inputs=2[vout]"
+    )
+
+
+def export_reels_clip(
+    source_video: Path,
+    highlight: Highlight,
+    output_path: Path,
+    profile: ExportProfile,
+    config: AppConfig,
+    *,
+    region: WebcamRegion,
+    use_nvenc: bool = False,
+    source_width: int = 1920,
+    source_height: int = 1080,
+    max_duration: float | None = None,
+) -> None:
+    """Cut highlight and export stacked reels layout with webcam on top."""
+    require_ffmpeg()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    duration = highlight.end - highlight.start
+    cap = max_duration or profile.max_duration
+    if duration > cap:
+        highlight = Highlight(
+            start=highlight.start,
+            end=highlight.start + cap,
+            score=highlight.score,
+            title=highlight.title,
+            reason=highlight.reason,
+            source=highlight.source,
+        )
+        duration = cap
+
+    codec, enc_args = select_video_encoder(profile, config, use_nvenc)
+    fc = build_reels_webcam_filter_complex(
+        source_width, source_height, profile.width, profile.height, region
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(highlight.start),
+        "-i",
+        str(source_video),
+        "-t",
+        str(duration),
+        "-filter_complex",
+        fc,
+        "-map",
+        "[vout]",
+        "-map",
+        "0:a?",
+        "-c:v",
+        codec,
+        *enc_args,
+        "-c:a",
+        profile.audio_codec,
+        "-b:a",
+        profile.audio_bitrate,
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise ExportError(f"Reels webcam export failed for {output_path.name}: {result.stderr[-1500:]}")
 
 
 def export_clip(

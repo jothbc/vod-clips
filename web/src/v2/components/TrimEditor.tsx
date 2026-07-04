@@ -48,7 +48,7 @@ export default function TrimEditor({
   const [previewUrl, setPreviewUrl] = useState("");
   const [clipId, setClipId] = useState("");
   const [trimJobId, setTrimJobId] = useState("");
-  const [saveMode, setSaveMode] = useState<"new_vod" | "replace" | null>(null);
+  const [saveMode, setSaveMode] = useState<"new_vod" | "replace" | "new_clip" | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useNvenc, setUseNvenc] = useState(true);
@@ -188,7 +188,7 @@ export default function TrimEditor({
     onFailed: () => setError("Falha ao gerar recorte"),
   });
 
-  async function handleFinalize(mode: "new_vod" | "replace") {
+  async function handleFinalize(mode: "new_vod" | "replace" | "new_clip") {
     if (!trimJobId || finalizing) return;
     if (mode === "replace") {
       const label = video.kind === "clip" ? "clip atual" : "VOD atual";
@@ -203,7 +203,7 @@ export default function TrimEditor({
       const res = await postTrimFinalize(trimJobId, mode);
       setSaveMode(mode);
       setClipId(res.video_id);
-      if (mode === "replace") {
+      if (mode === "replace" || mode === "new_clip") {
         onDone();
       }
     } catch (e) {
@@ -471,7 +471,9 @@ export default function TrimEditor({
             {saveMode
               ? saveMode === "new_vod"
                 ? "Novo VOD salvo na biblioteca."
-                : "Vídeo original atualizado."
+                : saveMode === "new_clip"
+                  ? "Clipe salvo na galeria."
+                  : "Vídeo original atualizado."
               : "Como deseja salvar este recorte?"}
           </p>
           <div className="v2-trim-preview-actions">
@@ -487,6 +489,14 @@ export default function TrimEditor({
                 </button>
                 <button
                   type="button"
+                  className="v2-btn"
+                  disabled={finalizing || !trimJobId}
+                  onClick={() => void handleFinalize("new_clip")}
+                >
+                  Salvar como clipe
+                </button>
+                <button
+                  type="button"
                   className="v2-btn v2-btn--danger"
                   disabled={finalizing || !trimJobId}
                   onClick={() => void handleFinalize("replace")}
@@ -498,6 +508,11 @@ export default function TrimEditor({
             {saveMode === "new_vod" && clipId && (
               <Link to={`/watch/${clipId}`} className="v2-btn v2-btn--primary">
                 Abrir novo VOD
+              </Link>
+            )}
+            {saveMode === "new_clip" && clipId && (
+              <Link to={`/watch/${clipId}`} className="v2-btn v2-btn--primary">
+                Abrir clipe
               </Link>
             )}
             <button type="button" className="v2-btn v2-btn--ghost" onClick={onClose}>

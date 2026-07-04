@@ -111,23 +111,35 @@ def export_cmd(
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind host (local only)"),
     port: int = typer.Option(8000, "--port", "-p"),
-    reload: bool = typer.Option(False, "--reload", help="Dev auto-reload"),
+    reload: bool = typer.Option(False, "--reload", help="Dev auto-reload on Python/config changes"),
 ) -> None:
     """Start web UI API server (use with `npm run dev` in web/)."""
     import uvicorn
 
     from reels.api.app import create_app
     from reels.logging_config import setup_logging
+    from reels.storage import project_root
 
     log_path = setup_logging()
     console.print(f"[dim]Logs: {log_path}[/dim]")
 
-    uvicorn.run(
-        create_app(),
-        host=host,
-        port=port,
-        reload=reload,
-    )
+    if reload:
+        root = project_root()
+        reload_dirs = [
+            str(root / "src" / "reels"),
+            str(root / "config"),
+        ]
+        console.print("[dim]Watch mode: auto-reload enabled[/dim]")
+        uvicorn.run(
+            "reels.api.app:create_app",
+            factory=True,
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=reload_dirs,
+        )
+    else:
+        uvicorn.run(create_app(), host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

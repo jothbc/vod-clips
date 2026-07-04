@@ -13,7 +13,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"${ROOT}/start.sh" "$@" &
+"${ROOT}/start.sh" --reload "$@" &
 API_PID=$!
 
 sleep 1
@@ -24,6 +24,6 @@ if [[ ! -d node_modules ]]; then
   npm install
 fi
 
-echo "reels: API → http://127.0.0.1:8000 (or --port)" >&2
+echo "reels: API → http://127.0.0.1:8000 (watch mode)" >&2
 echo "reels: UI  → http://127.0.0.1:5173" >&2
 exec npm run dev

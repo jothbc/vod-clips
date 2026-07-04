@@ -9,7 +9,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from reels.models import ClipMetadata, VideoIndex, VideoKind, VideoMetadata
+from reels.models import ClipMetadata, VideoIndex, VideoKind, VideoMetadata, WebcamRegion
 from reels.probe import probe_video
 from reels.storage import CHUNK_SIZE, MAX_UPLOAD_BYTES, delete_path, project_root, temp_root
 
@@ -527,6 +527,157 @@ def save_clip_metadata(parent_slug: str, clip: ClipMetadata) -> Path:
     path = d / "meta.json"
     path.write_text(clip.model_dump_json(indent=2), encoding="utf-8")
     return d
+
+
+def load_clip_metadata(parent_slug: str, clip_slug: str) -> ClipMetadata | None:
+    path = clip_meta_path(parent_slug, clip_slug)
+    if not path.is_file():
+        return None
+    return ClipMetadata.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _even_dim(n: int) -> int:
+    return max(2, n - (n % 2))
+
+
+def validate_webcam_region(
+    region: WebcamRegion,
+    *,
+    width: int,
+    height: int,
+) -> WebcamRegion:
+    if width <= 0 or height <= 0:
+        raise ValueError("Invalid source dimensions")
+    x1 = region.x1 - (region.x1 % 2)
+    y1 = region.y1 - (region.y1 % 2)
+    x2 = region.x2 - (region.x2 % 2)
+    y2 = region.y2 - (region.y2 % 2)
+    if x2 <= x1:
+        x2 = min(width, x1 + 2)
+    if y2 <= y1:
+        y2 = min(height, y1 + 2)
+    if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+        raise ValueError("Region must be inside the frame with x1<x2 and y1<y2")
+    cw, ch = x2 - x1, y2 - y1
+    if cw < 8 or ch < 8:
+        raise ValueError("Region is too small")
+    return WebcamRegion(
+        x1=x1,
+        y1=y1,
+        x2=x2,
+        y2=y2,
+        source_width=width,
+        source_height=height,
+        frame_at=max(0.0, region.frame_at),
+    )
+
+
+def desktop_frame_path(video_id: str) -> Path:
+    """Path to the desktop-format mp4 used for webcam ROI (source or youtube clip)."""
+    meta = resolve_video_id(video_id)
+    if meta.kind == "clip" and meta.parent_slug and meta.clip_slug:
+        yt = clip_dir(meta.parent_slug, meta.clip_slug) / "youtube.mp4"
+        if yt.is_file():
+            return yt
+        raise FileNotFoundError("Clip has no desktop (youtube) format")
+    path = source_path(meta.slug)
+    if not path.is_file():
+        raise FileNotFoundError("Source video not found")
+    return path
+
+
+def is_webcam_eligible(video_id: str) -> bool:
+    try:
+        meta = resolve_video_id(video_id)
+    except FileNotFoundError:
+        return False
+    if meta.kind == "original":
+        if meta.width > 0 and meta.height > 0:
+            return meta.width >= meta.height
+        path = source_path(meta.slug)
+        if not path.is_file():
+            return False
+        info = probe_video(path)
+        return info.width >= info.height
+    if meta.kind == "clip" and meta.parent_slug and meta.clip_slug:
+        formats = list(meta.formats or [])
+        if "youtube" not in formats:
+            cm = load_clip_metadata(meta.parent_slug, meta.clip_slug)
+            if cm:
+                formats = list(cm.formats or [])
+        return "youtube" in formats and (clip_dir(meta.parent_slug, meta.clip_slug) / "youtube.mp4").is_file()
+    return False
+
+
+def resolve_webcam_region(video_id: str) -> WebcamRegion | None:
+    """Return webcam bbox for this video, falling back to parent VOD for clips."""
+    own = get_own_webcam_region(video_id)
+    if own:
+        return own
+    try:
+        meta = resolve_video_id(video_id)
+    except FileNotFoundError:
+        return None
+    if meta.kind == "clip" and meta.parent_slug:
+        parent = load_metadata(meta.parent_slug)
+        if parent and parent.webcam_region:
+            return parent.webcam_region
+    return None
+
+
+def save_webcam_region(video_id: str, region: WebcamRegion) -> WebcamRegion:
+    meta = resolve_video_id(video_id)
+    frame = desktop_frame_path(video_id)
+    info = probe_video(frame)
+    validated = validate_webcam_region(region, width=info.width, height=info.height)
+    if meta.kind == "clip" and meta.parent_slug and meta.clip_slug:
+        cm = load_clip_metadata(meta.parent_slug, meta.clip_slug)
+        if cm is None:
+            raise FileNotFoundError("Clip metadata not found")
+        cm.webcam_region = validated
+        save_clip_metadata(meta.parent_slug, cm)
+        return validated
+    if meta.kind != "original":
+        raise ValueError("Cannot save webcam region for this video type")
+    parent = load_metadata(meta.slug)
+    if parent is None:
+        raise FileNotFoundError("Video metadata not found")
+    parent.webcam_region = validated
+    save_metadata(parent)
+    return validated
+
+
+def clear_webcam_region(video_id: str) -> None:
+    meta = resolve_video_id(video_id)
+    if meta.kind == "clip" and meta.parent_slug and meta.clip_slug:
+        cm = load_clip_metadata(meta.parent_slug, meta.clip_slug)
+        if cm is None:
+            return
+        cm.webcam_region = None
+        save_clip_metadata(meta.parent_slug, cm)
+        return
+    if meta.kind != "original":
+        return
+    parent = load_metadata(meta.slug)
+    if parent is None:
+        return
+    parent.webcam_region = None
+    save_metadata(parent)
+
+
+def get_own_webcam_region(video_id: str) -> WebcamRegion | None:
+    """Region stored on this video only (no parent fallback)."""
+    try:
+        meta = resolve_video_id(video_id)
+    except FileNotFoundError:
+        return None
+    if meta.kind == "clip" and meta.parent_slug and meta.clip_slug:
+        cm = load_clip_metadata(meta.parent_slug, meta.clip_slug)
+        return cm.webcam_region if cm else None
+    if meta.kind == "original":
+        parent = load_metadata(meta.slug)
+        return parent.webcam_region if parent else None
+    return None
 
 
 def make_derivative_clip_slug(parent_slug: str, prefix: str) -> str:

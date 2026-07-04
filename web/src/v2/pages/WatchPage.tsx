@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { fetchRelated, type VideoSummary } from "../../api/v2";
+import { fetchRelated, postTransformReel, type VideoSummary } from "../../api/v2";
+import type { JobState } from "../../api/client";
 import { formatMmSs, formatRange } from "../../utils/timeFormat";
 import AppHeader from "../components/AppHeader";
 import ActionBar from "../components/ActionBar";
 import CaptionsModal from "../components/CaptionsModal";
+import PublishModal from "../components/PublishModal";
 import CleanupModal from "../components/CleanupModal";
 import FormatToggle, { type ClipFormat } from "../components/FormatToggle";
 import GenerateClipsModal from "../components/GenerateClipsModal";
+import JobProgressBar from "../components/JobProgressBar";
+import TransformReelModal from "../components/TransformReelModal";
 import TranscriptEditor from "../components/TranscriptEditor";
 import TrimEditor from "../components/TrimEditor";
 import WatchPlayer from "../components/WatchPlayer";
+import WebcamModal from "../components/WebcamModal";
 import { useVideo } from "../hooks/useVideo";
+import { useV2Job } from "../hooks/useV2Job";
 import "../v2.css";
 
 function formatDuration(seconds: number): string {
@@ -40,7 +46,12 @@ export default function WatchPage() {
   const [clipsModalOpen, setClipsModalOpen] = useState(false);
   const [captionsModalOpen, setCaptionsModalOpen] = useState(false);
   const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [webcamModalOpen, setWebcamModalOpen] = useState(false);
+  const [transformModalOpen, setTransformModalOpen] = useState(false);
   const [trimMode, setTrimMode] = useState(false);
+  const [transformMessage, setTransformMessage] = useState<string | null>(null);
+  const [transformClipId, setTransformClipId] = useState("");
   const playerRef = useRef<HTMLVideoElement>(null);
 
   const clipFormats = video?.formats?.length ? video.formats : video?.format ? [video.format] : [];
@@ -96,6 +107,73 @@ export default function WatchPage() {
     void reloadRelated();
     window.setTimeout(() => void reloadRelated(), 1000);
   }, [refresh, reloadRelated]);
+
+  const onTransformCompleted = useCallback(
+    (job: JobState) => {
+      const clipId = job.result_clip_id || job.result_video_id || "";
+      setTransformClipId(clipId);
+      setTransformMessage("Reel salvo na galeria.");
+      handleFeatureDone();
+    },
+    [handleFeatureDone]
+  );
+
+  const {
+    job: transformJob,
+    error: transformError,
+    running: transformRunning,
+    waitForJob: waitForTransformJob,
+    cancel: cancelTransformJob,
+  } = useV2Job({
+    onCompleted: onTransformCompleted,
+    onFailed: () => setTransformMessage("Falha ao transformar em reel"),
+  });
+
+  const canTransformReel = useMemo(() => {
+    if (!video) return false;
+    const isDesktopClip =
+      video.kind === "clip" &&
+      activeFormat === "youtube" &&
+      (video.formats?.includes("youtube") ?? video.format === "youtube");
+    const isLandscapeVod =
+      video.kind === "original" &&
+      video.width > 0 &&
+      video.height > 0 &&
+      video.width >= video.height;
+    return isDesktopClip || isLandscapeVod;
+  }, [video, activeFormat]);
+
+  const canWebcam = useMemo(() => {
+    if (!video) return false;
+    if (video.webcam_eligible) return true;
+    const isDesktopClip =
+      video.kind === "clip" &&
+      (video.formats?.includes("youtube") ?? video.format === "youtube");
+    const isLandscapeVod =
+      video.kind === "original" &&
+      video.width > 0 &&
+      video.height > 0 &&
+      video.width >= video.height;
+    return isDesktopClip || isLandscapeVod;
+  }, [video]);
+
+  const hasWebcamRegion = Boolean(video?.has_webcam_region);
+
+  const handleTransformReel = useCallback(
+    async (includeWebcam: boolean) => {
+      if (!video || transformRunning) return;
+      setTransformMessage(null);
+      setTransformClipId("");
+      setTransformModalOpen(false);
+      try {
+        const res = await postTransformReel(video.id, { include_webcam: includeWebcam });
+        waitForTransformJob(res.job_id);
+      } catch (e) {
+        setTransformMessage(e instanceof Error ? e.message : "Erro ao iniciar transformação");
+      }
+    },
+    [video, transformRunning, waitForTransformJob]
+  );
 
   if (loading) {
     return (
@@ -158,9 +236,31 @@ export default function WatchPage() {
               onGenerateClips={() => setClipsModalOpen(true)}
               onOpenCaptions={() => setCaptionsModalOpen(true)}
               onOpenCleanup={() => setCleanupModalOpen(true)}
+              onOpenPublish={() => setPublishModalOpen(true)}
+              onOpenWebcam={() => setWebcamModalOpen(true)}
+              canWebcam={canWebcam}
               trimMode={trimMode}
               onToggleTrim={() => setTrimMode((v) => !v)}
+              canTransformReel={canTransformReel}
+              transformBusy={transformRunning}
+              onTransformReel={() => setTransformModalOpen(true)}
             />
+            {(transformRunning || transformJob) && (
+              <div className="v2-trim-processing">
+                <JobProgressBar job={transformJob} onCancel={cancelTransformJob} />
+              </div>
+            )}
+            {(transformMessage || transformError) && (
+              <p className="v2-card-meta">
+                {transformError || transformMessage}
+                {transformClipId && (
+                  <>
+                    {" "}
+                    <Link to={`/watch/${transformClipId}?format=reels`}>Abrir reel</Link>
+                  </>
+                )}
+              </p>
+            )}
             {trimMode && video.duration > 0 && (
               <TrimEditor
                 video={video}
@@ -244,6 +344,29 @@ export default function WatchPage() {
             setCleanupModalOpen(false);
             handleFeatureDone();
           }}
+        />
+      )}
+      {publishModalOpen && (
+        <PublishModal
+          video={video}
+          sourceFormat={video.kind === "clip" ? activeFormat : undefined}
+          onClose={() => setPublishModalOpen(false)}
+        />
+      )}
+      {webcamModalOpen && (
+        <WebcamModal
+          video={video}
+          playerRef={playerRef}
+          onClose={() => setWebcamModalOpen(false)}
+          onSaved={() => void refresh()}
+        />
+      )}
+      {transformModalOpen && (
+        <TransformReelModal
+          hasWebcamRegion={hasWebcamRegion}
+          busy={transformRunning}
+          onClose={() => setTransformModalOpen(false)}
+          onChoose={(includeWebcam) => void handleTransformReel(includeWebcam)}
         />
       )}
     </div>

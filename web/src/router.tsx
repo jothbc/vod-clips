@@ -5,6 +5,7 @@ import { SystemStatusProvider } from "./v2/hooks/useSystemStatus";
 import HomePage from "./v2/pages/HomePage";
 import SearchPage from "./v2/pages/SearchPage";
 import WatchPage from "./v2/pages/WatchPage";
+import PublishWalletPage from "./v2/pages/PublishWalletPage";
 
 export default function AppRouter() {
   return (
@@ -14,6 +15,7 @@ export default function AppRouter() {
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/watch/:id" element={<WatchPage />} />
+          <Route path="/publish/wallet" element={<PublishWalletPage />} />
           <Route path="/old/*" element={<LegacyApp />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { postMetadata, postPublish, type VideoDetail } from "../../api/v2";
+import { postMetadata, type VideoDetail } from "../../api/v2";
 
 interface Props {
   video: VideoDetail;
@@ -7,8 +7,14 @@ interface Props {
   onGenerateClips: () => void;
   onOpenCaptions: () => void;
   onOpenCleanup: () => void;
+  onOpenPublish: () => void;
+  onOpenWebcam?: () => void;
+  canWebcam?: boolean;
   trimMode: boolean;
   onToggleTrim: () => void;
+  canTransformReel?: boolean;
+  transformBusy?: boolean;
+  onTransformReel?: () => void;
 }
 
 export default function ActionBar({
@@ -17,8 +23,14 @@ export default function ActionBar({
   onGenerateClips,
   onOpenCaptions,
   onOpenCleanup,
+  onOpenPublish,
+  onOpenWebcam,
+  canWebcam = false,
   trimMode,
   onToggleTrim,
+  canTransformReel = false,
+  transformBusy = false,
+  onTransformReel,
 }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -38,13 +50,15 @@ export default function ActionBar({
     }
   }
 
+  const anyBusy = !!busy || transformBusy;
+
   return (
     <div>
       <div className="v2-actions">
         <button
           type="button"
           className="v2-btn v2-btn--primary"
-          disabled={!!busy}
+          disabled={anyBusy}
           onClick={() =>
             run(
               "metadata",
@@ -58,7 +72,7 @@ export default function ActionBar({
         <button
           type="button"
           className="v2-btn"
-          disabled={!!busy || !video.has_transcript || !isOriginal}
+          disabled={anyBusy || !video.has_transcript || !isOriginal}
           onClick={onGenerateClips}
         >
           Gerar clips
@@ -66,7 +80,7 @@ export default function ActionBar({
         <button
           type="button"
           className="v2-btn"
-          disabled={!!busy || !video.has_transcript}
+          disabled={anyBusy || !video.has_transcript}
           onClick={onOpenCleanup}
         >
           Remover silêncios
@@ -74,26 +88,41 @@ export default function ActionBar({
         <button
           type="button"
           className="v2-btn"
-          disabled={!!busy || !video.has_transcript}
+          disabled={anyBusy || !video.has_transcript}
           onClick={onOpenCaptions}
         >
           Gerar legendas
         </button>
+        {canWebcam && onOpenWebcam && (
+          <button type="button" className="v2-btn" disabled={anyBusy} onClick={onOpenWebcam}>
+            Webcam
+          </button>
+        )}
         <button
           type="button"
           className={`v2-btn${trimMode ? " v2-btn--primary" : ""}`}
-          disabled={!!busy}
+          disabled={anyBusy}
           onClick={onToggleTrim}
         >
           {trimMode ? "Fechar recorte" : "Recortar"}
         </button>
+        {canTransformReel && onTransformReel && (
+          <button
+            type="button"
+            className="v2-btn"
+            disabled={anyBusy}
+            onClick={onTransformReel}
+          >
+            {transformBusy ? "Transformando…" : "Transformar em reel"}
+          </button>
+        )}
         <button
           type="button"
           className="v2-btn"
-          disabled={!!busy || !video.has_transcript}
-          onClick={() => run("publish", () => postPublish(video.id))}
+          disabled={anyBusy || !video.has_transcript}
+          onClick={onOpenPublish}
         >
-          {busy === "publish" ? "Processando…" : "Publicar"}
+          Publicar
         </button>
       </div>
       {message && <p className="v2-card-meta">{message}</p>}

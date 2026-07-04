@@ -19,7 +19,26 @@ if (-not (Test-Path $VenvReels)) {
     }
 }
 
-$Api = Start-Process -FilePath $VenvReels -ArgumentList "serve" -WorkingDirectory $Root -PassThru -NoNewWindow
+function Stop-StaleReelsApi {
+    $listeners = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $listeners) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine -match 'reels\.exe|reels\.cli|uvicorn') {
+            Write-Host "reels: stopping stale API (pid $($conn.OwningProcess))" -ForegroundColor Yellow
+            Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'reels\.exe serve' -and $_.CommandLine -match [regex]::Escape($Root) } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    Start-Sleep -Milliseconds 500
+}
+
+Stop-StaleReelsApi
+
+$Api = Start-Process -FilePath $VenvReels -ArgumentList "serve", "--reload" -WorkingDirectory $Root -PassThru -NoNewWindow
 Start-Sleep -Seconds 1
 
 $WebDir = Join-Path $Root "web"
@@ -29,7 +48,7 @@ if (-not (Test-Path "node_modules")) {
     npm install
 }
 
-Write-Host 'reels: API -> http://127.0.0.1:8000' -ForegroundColor DarkGray
+Write-Host 'reels: API -> http://127.0.0.1:8000 (watch mode)' -ForegroundColor DarkGray
 Write-Host 'reels: UI  -> http://127.0.0.1:5173' -ForegroundColor DarkGray
 
 try {

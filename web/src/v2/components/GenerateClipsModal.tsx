@@ -9,6 +9,7 @@ import {
 } from "../../api/v2";
 import ExportResolutionPicker from "../../components/ExportResolutionPicker";
 import { formatMmSs, formatRange, parseMmSs } from "../../utils/timeFormat";
+import DockTooltip from "./DockTooltip";
 import JobProgressBar from "./JobProgressBar";
 import { useV2Job } from "../hooks/useV2Job";
 
@@ -25,15 +26,20 @@ interface Props {
 interface HighlightRow extends HighlightItem {
   export_youtube: boolean;
   export_reels: boolean;
+  include_webcam: boolean;
   burn_captions: boolean;
   cleanup_silence: boolean;
 }
 
-function mapHighlights(items: HighlightItem[]): HighlightRow[] {
+const WEBCAM_HINT =
+  "Use a ação Webcam no vídeo desktop para marcar a região da câmera antes de incluir no mobile.";
+
+function mapHighlights(items: HighlightItem[], hasWebcamRegion: boolean): HighlightRow[] {
   return items.map((h) => ({
     ...h,
     export_youtube: true,
     export_reels: true,
+    include_webcam: hasWebcamRegion,
     burn_captions: false,
     cleanup_silence: false,
   }));
@@ -92,15 +98,17 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
   const [youtubeResolution, setYoutubeResolution] = useState<ResolutionPreset | null>(null);
   const [reelsResolution, setReelsResolution] = useState<ResolutionPreset | null>(null);
 
+  const hasWebcamRegion = Boolean(video.has_webcam_region);
+
   const applyHighlightsResponse = useCallback((data: Awaited<ReturnType<typeof fetchHighlights>>) => {
-    setHighlights(mapHighlights(data.highlights));
+    setHighlights(mapHighlights(data.highlights, hasWebcamRegion));
     if (data.source_width) setSourceWidth(data.source_width);
     if (data.source_height) setSourceHeight(data.source_height);
     if (data.youtube_presets) setYoutubePresets(data.youtube_presets);
     if (data.reels_presets) setReelsPresets(data.reels_presets);
     if (data.default_youtube) setYoutubeResolution(data.default_youtube);
     if (data.default_reels) setReelsResolution(data.default_reels);
-  }, []);
+  }, [hasWebcamRegion]);
 
   const onAnalyzeDone = useCallback(async () => {
     try {
@@ -158,6 +166,7 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
           title: h.title,
           export_youtube: h.export_youtube,
           export_reels: h.export_reels,
+          include_webcam: h.export_reels && h.include_webcam,
           burn_captions: h.burn_captions,
           cleanup_silence: h.cleanup_silence,
         })),
@@ -282,10 +291,29 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
                           <input
                             type="checkbox"
                             checked={h.export_reels}
-                            onChange={(e) => updateRow(h.index, { export_reels: e.target.checked })}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              updateRow(h.index, {
+                                export_reels: checked,
+                                include_webcam: checked ? h.include_webcam : false,
+                              });
+                            }}
                           />{" "}
                           Mobile
                         </label>
+                        {h.export_reels && (
+                          <DockTooltip text={hasWebcamRegion ? "Incluir faixa da webcam no topo do mobile" : WEBCAM_HINT}>
+                            <label className={!hasWebcamRegion ? "v2-label--disabled" : ""}>
+                              <input
+                                type="checkbox"
+                                checked={h.include_webcam}
+                                disabled={!hasWebcamRegion}
+                                onChange={(e) => updateRow(h.index, { include_webcam: e.target.checked })}
+                              />{" "}
+                              Incluir webcam
+                            </label>
+                          </DockTooltip>
+                        )}
                       </div>
                     </div>
                     <span className="v2-card-meta">{h.score.toFixed(2)}</span>

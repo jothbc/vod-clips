@@ -21,6 +21,7 @@ from reels.api.schemas import (
     UploadResponse,
 )
 from reels.api.upload import save_upload_file
+from reels.api.publish_wallet import router as publish_wallet_router
 from reels.api.videos import router as v2_router
 from reels.caption_fonts import list_caption_fonts, resolve_font_path
 from reels.captions import load_captions, write_captions
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(v2_router)
+    app.include_router(publish_wallet_router)
 
     @app.get("/api/ready")
     def ready() -> dict:

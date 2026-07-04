@@ -183,6 +183,7 @@ def _build_span_encode_cmd(
     codec: str,
     enc_args: list[str],
     crop_filter: str | None,
+    filter_complex: str | None = None,
     threads: int,
 ) -> list[str]:
     """Command to encode a single span; keeps memory bounded to one segment."""
@@ -197,7 +198,9 @@ def _build_span_encode_cmd(
         "-t",
         str(duration),
     ]
-    if crop_filter:
+    if filter_complex:
+        cmd.extend(["-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?"])
+    elif crop_filter:
         cmd.extend(["-vf", crop_filter])
     cmd.extend(
         [
@@ -226,6 +229,7 @@ def _export_kept_spans(
     output_path: Path,
     *,
     crop_filter: str | None = None,
+    filter_complex: str | None = None,
     use_nvenc: bool = False,
     config: AppConfig,
     on_progress: Callable[[float], None] | None = None,
@@ -255,6 +259,7 @@ def _export_kept_spans(
             codec=codec,
             enc_args=enc_args,
             crop_filter=crop_filter,
+            filter_complex=filter_complex,
             threads=threads,
         )
         run_ffmpeg(
@@ -291,6 +296,7 @@ def _export_kept_spans(
                 codec=codec,
                 enc_args=enc_args,
                 crop_filter=crop_filter,
+                filter_complex=filter_complex,
                 threads=threads,
             )
             run_ffmpeg(
@@ -683,6 +689,10 @@ class JobManager:
                 self._run_v2_trim(
                     job_id, video, out, config, req, reporter, cancel_event, state
                 )
+            elif req.feature == "v2_transform_reel":
+                self._run_v2_transform_reel(
+                    job_id, video, out, config, req, reporter, cancel_event, state
+                )
             else:
                 self._run_reels_analysis(
                     job_id, video, out, config, req, reporter, cancel_event, state
@@ -848,6 +858,8 @@ class JobManager:
         req: CreateJobRequest,
         state: JobState,
     ) -> None:
+        out.mkdir(parents=True, exist_ok=True)
+        self._write_v2_job_context(out, dict(req.params))
         video_paths = [validate_video_path(str(p)) for p in req.params.get("video_paths", [state.video_path])]
         platform = str(req.params.get("platform", "youtube"))
         ctx = parse_publish_context(req.params)
@@ -1171,10 +1183,10 @@ class JobManager:
         cancel_event: threading.Event,
         state: JobState,
     ) -> None:
-        from reels.export import export_clip, load_export_profiles
+        from reels.export import export_clip, export_reels_clip, load_export_profiles
         from reels.export_resolution import default_reels_size, default_youtube_size
         from reels.models import ClipMetadata, Highlight
-        from reels.video_store import clip_dir, save_clip_metadata
+        from reels.video_store import clip_dir, resolve_webcam_region, save_clip_metadata
 
         slug = str(req.params.get("video_slug", ""))
         selections = req.params.get("selections") or []
@@ -1198,6 +1210,7 @@ class JobManager:
         rl_w, rl_h = default_reels_size(info.width, info.height)
         yt_profile = profiles.youtube.model_copy(update={"width": yt_w, "height": yt_h})
         reels_profile = profiles.reels.model_copy(update={"width": rl_w, "height": rl_h})
+        webcam_region = resolve_webcam_region(slug)
 
         total_steps = sum(
             1
@@ -1249,16 +1262,30 @@ class JobManager:
                     total=total_steps,
                     message=f"Exporting Reels clip {idx + 1}",
                 )
-                export_clip(
-                    video,
-                    highlight,
-                    out_dir / "reels.mp4",
-                    reels_profile,
-                    config,
-                    use_nvenc=use_nvenc,
-                    source_width=info.width,
-                    source_height=info.height,
-                )
+                include_webcam = bool(sel.get("include_webcam"))
+                if include_webcam and webcam_region:
+                    export_reels_clip(
+                        video,
+                        highlight,
+                        out_dir / "reels.mp4",
+                        reels_profile,
+                        config,
+                        region=webcam_region,
+                        use_nvenc=use_nvenc,
+                        source_width=info.width,
+                        source_height=info.height,
+                    )
+                else:
+                    export_clip(
+                        video,
+                        highlight,
+                        out_dir / "reels.mp4",
+                        reels_profile,
+                        config,
+                        use_nvenc=use_nvenc,
+                        source_width=info.width,
+                        source_height=info.height,
+                    )
                 formats.append("reels")
 
             save_clip_metadata(
@@ -1779,6 +1806,99 @@ class JobManager:
             message="Recorte pronto — escolha como salvar",
         )
 
+    def _run_v2_transform_reel(
+        self,
+        job_id: str,
+        video: Path,
+        out: Path,
+        config: AppConfig,
+        req: CreateJobRequest,
+        reporter: CallbackProgressReporter,
+        cancel_event: threading.Event,
+        state: JobState,
+    ) -> None:
+        from reels.export import build_crop_filter, build_reels_webcam_filter_complex, load_export_profiles, resolve_export_nvenc
+        from reels.export_resolution import default_reels_size
+        from reels.video_store import resolve_webcam_region
+
+        slug = str(req.params.get("video_slug", "")) or self._slug_from_v2_path(video)
+        explicit_nvenc = req.params.get("use_nvenc")
+        use_nvenc = resolve_export_nvenc(
+            config,
+            None if explicit_nvenc is None else bool(explicit_nvenc),
+        )
+        enc_label = "GPU/NVENC" if use_nvenc else "CPU"
+        out.mkdir(parents=True, exist_ok=True)
+        self._write_v2_job_context(out, dict(req.params))
+
+        reporter.report("probe", message="Probing video…")
+        info = probe_video(video)
+        reporter.mark_phase_complete("probe")
+        if cancel_event.is_set():
+            raise RuntimeError("Cancelled")
+
+        profiles = load_export_profiles()
+        rl_w, rl_h = default_reels_size(info.width, info.height)
+        reels_profile = profiles.reels.model_copy(update={"width": rl_w, "height": rl_h})
+        include_webcam = bool(req.params.get("include_webcam"))
+        source_video_id = str(req.params.get("source_video_id", ""))
+        webcam_region = resolve_webcam_region(source_video_id) if include_webcam and source_video_id else None
+        if include_webcam and webcam_region:
+            filter_complex = build_reels_webcam_filter_complex(
+                info.width, info.height, rl_w, rl_h, webcam_region
+            )
+            crop = None
+        else:
+            filter_complex = None
+            crop = build_crop_filter(info.width, info.height, reels_profile)
+        dest = out / "reels" / "reels.mp4"
+        keep = [(0.0, info.duration)]
+
+        def on_ff_progress(frac: float) -> None:
+            pct = int(frac * 100)
+            reporter.report(
+                "render",
+                current=int(frac * 1000),
+                total=1000,
+                message=f"Transforming to reel ({enc_label})… {pct}%",
+            )
+
+        reporter.report("render", message=f"Transforming to reel ({enc_label})… 0%", current=0, total=1000)
+        _export_kept_spans(
+            video,
+            keep,
+            dest,
+            crop_filter=crop,
+            filter_complex=filter_complex,
+            use_nvenc=use_nvenc,
+            config=config,
+            on_progress=on_ff_progress,
+            cancel_event=cancel_event,
+        )
+        reporter.mark_phase_complete("render")
+
+        ctx = self._load_v2_job_context(out)
+        if ctx.get("source_clip_slug"):
+            clip_start = float(ctx.get("clip_start", 0))
+            clip_end = float(ctx.get("clip_end", clip_start + info.duration))
+        else:
+            clip_start = 0.0
+            clip_end = info.duration
+        _clip, clip_id = self._register_v2_derivative_clip(
+            slug,
+            ctx,
+            suffix="reels",
+            title_suffix="Reels",
+            source_feature="reformat",
+            start=clip_start,
+            end=clip_end,
+            files={"reels": dest},
+        )
+        state.result_clip_id = clip_id
+        state.result_video_id = clip_id
+        state.clips_exported = True
+        self._finish_job(job_id, state, success=True, message="Reel clip saved to gallery")
+
     def finalize_v2_trim(self, job_id: str, mode: str) -> dict[str, Any]:
         from reels.video_store import (
             load_metadata,
@@ -1835,6 +1955,33 @@ class JobManager:
                 state.result_clip_id = updated.slug
             else:
                 raise ValueError("Cannot replace this video type")
+        elif mode == "new_clip":
+            parent_slug = meta.parent_slug or meta.slug
+            raw_spans = ctx.get("keep_spans") or []
+            kept_duration = sum(float(s[1]) - float(s[0]) for s in raw_spans)
+            clip_start = float(ctx.get("clip_start", 0))
+            if ctx.get("source_clip_slug"):
+                start = clip_start
+                end = clip_start + kept_duration
+            else:
+                start = 0.0
+                end = kept_duration
+            if ctx.get("source_clip_slug"):
+                fmt = str(ctx.get("source_format") or "youtube")
+            else:
+                fmt = "youtube"
+            _clip, clip_id = self._register_v2_derivative_clip(
+                parent_slug,
+                ctx,
+                suffix="recorte",
+                title_suffix="recorte",
+                source_feature="trim",
+                start=start,
+                end=end,
+                files={fmt: trim_path},
+            )
+            state.result_video_id = clip_id
+            state.result_clip_id = clip_id
         else:
             raise ValueError(f"Unknown trim finalize mode: {mode}")
 

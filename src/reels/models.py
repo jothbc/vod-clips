@@ -150,6 +150,18 @@ class ResolutionPreset(BaseModel):
 VideoKind = Literal["original", "clip"]
 
 
+class WebcamRegion(BaseModel):
+    """Pixel bbox of the webcam overlay on a desktop-format frame."""
+
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    source_width: int = 0
+    source_height: int = 0
+    frame_at: float = 0.0
+
+
 class VideoMetadata(BaseModel):
     """Probe + upload info stored per video slug."""
 
@@ -170,6 +182,7 @@ class VideoMetadata(BaseModel):
     start: float | None = None
     end: float | None = None
     formats: list[str] = Field(default_factory=list)
+    webcam_region: WebcamRegion | None = None
 
 
 class VideoTranscript(BaseModel):
@@ -179,7 +192,7 @@ class VideoTranscript(BaseModel):
     segments_original: list[dict[str, Any]] = Field(default_factory=list)
 
 
-ClipSourceFeature = Literal["highlight", "captions", "cleanup", "trim"]
+ClipSourceFeature = Literal["highlight", "captions", "cleanup", "trim", "reformat"]
 
 
 class ClipMetadata(BaseModel):
@@ -192,6 +205,7 @@ class ClipMetadata(BaseModel):
     formats: list[str] = Field(default_factory=list)
     score: float = 0.0
     source_feature: ClipSourceFeature = "highlight"
+    webcam_region: WebcamRegion | None = None
 
 
 class VideoIndex(BaseModel):

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 from reels.config import AppConfig
 from reels.models import VideoInfo
+from reels.subprocess_util import check_spawn_headroom, require_tool, run_tool
 
 
 class ProxyError(RuntimeError):
@@ -15,10 +15,7 @@ class ProxyError(RuntimeError):
 
 
 def require_ffmpeg() -> str:
-    path = shutil.which("ffmpeg")
-    if not path:
-        raise ProxyError("ffmpeg not found. Install: sudo apt install ffmpeg")
-    return path
+    return require_tool("ffmpeg")
 
 
 def check_disk_space(video: VideoInfo, output_dir: Path, config: AppConfig) -> None:
@@ -37,6 +34,10 @@ def check_disk_space(video: VideoInfo, output_dir: Path, config: AppConfig) -> N
         )
 
 
+def preview_stream_path(output_dir: Path, video_stem: str) -> Path:
+    return output_dir / f"{video_stem}_preview.mp4"
+
+
 def proxy_paths(output_dir: Path, video_stem: str) -> tuple[Path, Path]:
     proxy = output_dir / f"{video_stem}_proxy.mp4"
     audio = output_dir / f"{video_stem}_audio_16k.wav"
@@ -44,8 +45,9 @@ def proxy_paths(output_dir: Path, video_stem: str) -> tuple[Path, Path]:
 
 
 def _extract_audio(video_path: Path, audio_path: Path, sample_rate: int) -> None:
+    ffmpeg = require_ffmpeg()
     audio_cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-y",
         "-i",
         str(video_path),
@@ -68,33 +70,40 @@ def generate_proxy(
     video: VideoInfo,
     *,
     skip_if_exists: bool = True,
-) -> tuple[Path, Path]:
-    """Prepare analysis inputs: 16 kHz mono WAV + video path for frame/scene work.
+) -> tuple[Path, Path, Path]:
+    """Prepare analysis inputs and optional browser preview remux.
 
-    Default ``audio_only`` skips video re-encode and uses the source file for
-    motion, scene detection, and VLM frame grabs (export still uses original).
+    Returns (video_for_analysis, audio_wav, preview_for_streaming).
     """
     require_ffmpeg()
+    check_spawn_headroom()
     output_dir.mkdir(parents=True, exist_ok=True)
     check_disk_space(video, output_dir, config)
 
     source = video_path.resolve()
     proxy_path, audio_path = proxy_paths(output_dir, video_path.stem)
+    preview_path = preview_stream_path(output_dir, video_path.stem)
     mode = config.proxy.video_mode
     ar = config.proxy.audio_sample_rate
 
     if mode == "audio_only":
         if skip_if_exists and audio_path.exists():
-            return source, audio_path
+            preview = preview_path if config.proxy.make_preview and preview_path.exists() else source
+            return source, audio_path, preview
         _extract_audio(source, audio_path, ar)
-        return source, audio_path
+        if config.proxy.make_preview:
+            _remux_preview(source, preview_path)
+            return source, audio_path, preview_path
+        return source, audio_path, source
 
     if skip_if_exists and proxy_path.exists() and audio_path.exists():
-        return proxy_path, audio_path
+        preview = preview_path if preview_path.exists() else proxy_path
+        return proxy_path, audio_path, preview
 
     if mode == "copy":
+        ffmpeg = require_ffmpeg()
         copy_cmd = [
-            "ffmpeg",
+            ffmpeg,
             "-y",
             "-i",
             str(source),
@@ -104,19 +113,21 @@ def generate_proxy(
             "+faststart",
             str(proxy_path),
         ]
-        result = subprocess.run(copy_cmd, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
+        try:
+            run_tool(copy_cmd, label="ffmpeg copy")
+        except Exception:
             mode = "transcode"
         else:
             if not audio_path.exists() or not skip_if_exists:
                 _extract_audio(source, audio_path, ar)
-            return proxy_path, audio_path
+            return proxy_path, audio_path, proxy_path
 
     height = config.hardware.proxy_height
     vbitrate = config.proxy.video_bitrate
     scale = f"scale=-2:{height}"
+    ffmpeg = require_ffmpeg()
     proxy_cmd = [
-        "ffmpeg",
+        ffmpeg,
         "-y",
         "-i",
         str(source),
@@ -138,7 +149,23 @@ def generate_proxy(
     ]
     _run(proxy_cmd, "proxy video")
     _extract_audio(source, audio_path, ar)
-    return proxy_path, audio_path
+    return proxy_path, audio_path, proxy_path
+
+
+def _remux_preview(source: Path, preview_path: Path) -> None:
+    ffmpeg = require_ffmpeg()
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(source),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(preview_path),
+    ]
+    _run(cmd, "preview remux")
 
 
 def cleanup_proxy(
@@ -149,8 +176,9 @@ def cleanup_proxy(
 ) -> None:
     """Remove generated proxy MP4 and temp audio (never deletes source VOD)."""
     proxy, audio = proxy_paths(output_dir, video_stem)
+    preview = preview_stream_path(output_dir, video_stem)
     source = source_video.resolve() if source_video else None
-    for path in (proxy, audio):
+    for path in (proxy, audio, preview):
         if not path.exists():
             continue
         if source and path.resolve() == source:
@@ -162,6 +190,7 @@ def cleanup_proxy(
 
 
 def _run(cmd: list[str], label: str) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise ProxyError(f"ffmpeg {label} failed: {result.stderr[-2000:]}")
+    try:
+        run_tool(cmd, label=f"ffmpeg {label}")
+    except Exception as e:
+        raise ProxyError(str(e)) from e

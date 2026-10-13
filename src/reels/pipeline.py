@@ -101,7 +101,7 @@ def analyze_vod(
             "proxy",
             message=_proxy_phase_message(config),
         )
-        proxy_path, audio_path = generate_proxy(
+        proxy_path, audio_path, _preview_path = generate_proxy(
             video_path, output_dir, config, video, skip_if_exists=resume
         )
         state.proxy_path = str(proxy_path)
@@ -160,7 +160,7 @@ def analyze_vod(
             t_heur = progress.add_task("Ranking heuristic...", total=None)
 
             progress.update(t_proxy, description=_proxy_phase_message(config))
-            proxy_path, audio_path = generate_proxy(
+            proxy_path, audio_path, _preview_path = generate_proxy(
                 video_path, output_dir, config, video, skip_if_exists=resume
             )
             state.proxy_path = str(proxy_path)

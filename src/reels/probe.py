@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
 from reels.models import VideoInfo
+from reels.subprocess_util import ToolError, check_spawn_headroom, require_tool, run_tool
 
 
 class ProbeError(RuntimeError):
@@ -15,13 +14,11 @@ class ProbeError(RuntimeError):
 
 
 def require_ffprobe() -> str:
-    path = shutil.which("ffprobe")
-    if not path:
-        raise ProbeError("ffprobe not found. Install ffmpeg: sudo apt install ffmpeg")
-    return path
+    return require_tool("ffprobe")
 
 
 def probe_video(video_path: Path) -> VideoInfo:
+    check_spawn_headroom()
     ffprobe = require_ffprobe()
     cmd = [
         ffprobe,
@@ -33,9 +30,10 @@ def probe_video(video_path: Path) -> VideoInfo:
         "-show_streams",
         str(video_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise ProbeError(f"ffprobe failed: {result.stderr}")
+    try:
+        result = run_tool(cmd, label="ffprobe")
+    except ToolError as e:
+        raise ProbeError(str(e)) from e
 
     data = json.loads(result.stdout)
     fmt = data.get("format", {})

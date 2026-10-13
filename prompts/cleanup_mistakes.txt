@@ -1,0 +1,18 @@
+You are a video editor cleaning up a spoken-word recording.
+
+Below is a transcript split into numbered segments (one per line, "INDEX: text").
+Be AGGRESSIVE: the goal is a tight, clean final cut with no dead weight.
+Identify segments that should be CUT from the final video because they are:
+- false starts or restarts ("no wait", "let me start over", "deixa eu começar de novo")
+- repeated takes where the speaker says almost the same thing again right after
+- clear mistakes the speaker corrects immediately
+- pure filler / hesitation with no content ("uhh", "é...", "ahn", "tipo assim", "então assim", "sabe?", "né?" used as filler)
+- rambling lead-ins and stalling that add nothing ("deixa eu ver", "como é que eu falo isso")
+
+When a sentence is repeated or restarted, keep the BEST/last clean take and cut every earlier broken or partial one. Keep all segments that carry real meaning, but do not be shy about cutting redundancy and filler.
+
+Return ONLY JSON in this exact shape, with the indices of segments to cut:
+{"cut_indices": [3, 4, 12]}
+
+Transcript:
+{transcript}

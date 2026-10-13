@@ -16,6 +16,65 @@ PHASE_WEIGHTS: dict[str, int] = {
     "export": 15,
 }
 
+REELS_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 2,
+    "proxy": 8,
+    "transcribe": 25,
+    "scenes": 5,
+    "heuristic": 10,
+    "vlm": 35,
+    "export": 15,
+}
+
+CLEANUP_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 3,
+    "transcribe": 35,
+    "edl": 22,
+    "verify": 15,
+    "render": 25,
+}
+
+CAPTIONS_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 5,
+    "transcribe": 40,
+    "segments": 20,
+    "render": 35,
+}
+
+PUBLISH_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 5,
+    "transcribe": 25,
+    "metadata": 30,
+    "thumbnail": 25,
+    "manifest": 15,
+}
+
+TRIM_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 5,
+    "render": 95,
+}
+
+TRANSFORM_REEL_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 5,
+    "render": 95,
+}
+
+CREATE_CLIP_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 5,
+    "export": 55,
+    "transcribe": 25,
+    "captions": 15,
+}
+
+FEATURE_PHASE_WEIGHTS: dict[str, dict[str, int]] = {
+    "v2_cleanup": CLEANUP_PHASE_WEIGHTS,
+    "v2_captions": CAPTIONS_PHASE_WEIGHTS,
+    "v2_trim": TRIM_PHASE_WEIGHTS,
+    "v2_transform_reel": TRANSFORM_REEL_PHASE_WEIGHTS,
+    "v2_create_clip": CREATE_CLIP_PHASE_WEIGHTS,
+    "publish": PUBLISH_PHASE_WEIGHTS,
+}
+
 
 @dataclass
 class ProgressEvent:
@@ -41,6 +100,7 @@ class CallbackProgressReporter:
     """Invokes a callback with ProgressEvent (used by JobManager / SSE)."""
 
     on_event: Callable[[ProgressEvent], None]
+    phase_weights: dict[str, int] = field(default_factory=lambda: dict(PHASE_WEIGHTS))
     _phase_done: dict[str, bool] = field(default_factory=dict)
     _vlm_current: int = 0
     _vlm_total: int = 0
@@ -76,6 +136,7 @@ class CallbackProgressReporter:
             self._vlm_total,
             self._export_current,
             self._export_total,
+            self.phase_weights,
         )
         event = ProgressEvent(
             phase=phase,
@@ -100,14 +161,16 @@ def _compute_percent(
     vlm_total: int,
     export_current: int,
     export_total: int,
+    phase_weights: dict[str, int] | None = None,
 ) -> float:
+    weights = phase_weights or PHASE_WEIGHTS
     done_weight = sum(
-        w for p, w in PHASE_WEIGHTS.items() if phase_done.get(p) and p != phase
+        w for p, w in weights.items() if phase_done.get(p) and p != phase
     )
     if phase in phase_done and phase_done[phase]:
-        done_weight += PHASE_WEIGHTS.get(phase, 0)
+        done_weight += weights.get(phase, 0)
 
-    weight = PHASE_WEIGHTS.get(phase, 0)
+    weight = weights.get(phase, 0)
     if phase == "vlm" and vlm_total > 0:
         frac = vlm_current / vlm_total
         return min(99.0, done_weight + weight * frac)

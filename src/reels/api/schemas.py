@@ -40,6 +40,7 @@ class UploadResponse(BaseModel):
     path: str
     filename: str
     size_bytes: int
+    video_id: str = ""
 
 
 class CleanupResponse(BaseModel):

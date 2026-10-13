@@ -95,6 +95,45 @@ class ProxyConfig(BaseModel):
     video_bitrate: str = "2M"
     audio_sample_rate: int = 16000
     min_free_disk_multiplier: float = 2.0
+    make_preview: bool = False
+
+
+class CleanupConfig(BaseModel):
+    min_gap_seconds: float = 0.35
+    pad_seconds: float = 0.05
+    use_silencedetect: bool = True
+    silence_noise_db: int = -30
+    remove_fillers: bool = True
+    use_llm: bool = True
+    llm_model: str = "llama3.2:3b"
+    formats: list[str] = Field(default_factory=lambda: ["youtube", "reels"])
+
+
+class CaptionsConfig(BaseModel):
+    max_words_per_line: int = 4
+    word_gap_seconds: float = 0.35
+    default_font: str = "montserrat-bold"
+    output_format: str = "reels"
+    bottom_margin_ratio: float = 0.15
+    font_size_ratio: float = 0.05
+    outline_size: int = 4
+    primary_colour: str = "#FFFFFF"
+    highlight_colour: str = "#FFE135"
+
+
+class PublishConfig(BaseModel):
+    llm_model: str = "llama3.2:3b"
+    youtube_title_max: int = 100
+    short_title_max: int = 80
+    thumbnail_jpeg_quality: int = 90
+    default_font: str = "montserrat-bold"
+
+
+class TwitchDownloadConfig(BaseModel):
+    max_concurrent: int = 2
+    skip_existing: bool = True
+    # Parallel HLS/DASH fragments per VOD (--concurrent-fragments). Raise on fast links.
+    concurrent_fragments: int = Field(default=32, ge=1, le=128)
 
 
 class PathsConfig(BaseModel):
@@ -108,6 +147,10 @@ class AppConfig(BaseModel):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     clip: ClipConfig = Field(default_factory=ClipConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
+    captions: CaptionsConfig = Field(default_factory=CaptionsConfig)
+    publish: PublishConfig = Field(default_factory=PublishConfig)
+    twitch_download: TwitchDownloadConfig = Field(default_factory=TwitchDownloadConfig)
     keywords: list[str] = Field(default_factory=list)
     paths: PathsConfig = Field(default_factory=PathsConfig)
 

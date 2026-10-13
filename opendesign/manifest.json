@@ -1,0 +1,36 @@
+{
+  "generated": "2026-09-21T09:40:00-03:00",
+  "sections": [
+    {
+      "id": "mockups",
+      "label": "Mockups",
+      "groups": [
+        {
+          "slug": "app-shell-layouts",
+          "files": [
+            { "label": "compare.html", "path": "mockups/app-shell-layouts/compare.html" },
+            { "label": "a-rails-studio.html", "path": "mockups/app-shell-layouts/a-rails-studio.html" },
+            { "label": "b-cinema-stage.html", "path": "mockups/app-shell-layouts/b-cinema-stage.html" },
+            { "label": "c-split-bay.html", "path": "mockups/app-shell-layouts/c-split-bay.html" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "design-systems",
+      "label": "Design Systems",
+      "groups": [
+        {
+          "slug": "reels-product",
+          "files": [
+            { "label": "README.md", "path": "design-systems/reels-product/README.md" },
+            { "label": "SKILL.md", "path": "design-systems/reels-product/SKILL.md" },
+            { "label": "colors_and_type.css", "path": "design-systems/reels-product/tokens/colors_and_type.css" },
+            { "label": "voice-and-tone.md", "path": "design-systems/reels-product/brand/voice-and-tone.md" },
+            { "label": "style-notes.md", "path": "design-systems/reels-product/brand/style-notes.md" }
+          ]
+        }
+      ]
+    }
+  ]
+}

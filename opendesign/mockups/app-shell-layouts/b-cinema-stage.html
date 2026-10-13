@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B — Cinema stage</title>
+  <link rel="stylesheet" href="../../design-systems/reels-product/tokens/colors_and_type.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #050607;
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      font-size: var(--body);
+    }
+    .note {
+      position: sticky; top: 0; z-index: 200;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 8px 16px;
+      background: #12151b;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: var(--caption);
+      color: var(--text-muted);
+    }
+    .note strong { color: var(--action-primary); }
+    .note a { color: var(--text-primary); }
+    .tabs { margin-left: auto; display: flex; gap: 6px; }
+    .tabs button {
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .tabs button[aria-pressed="true"] {
+      background: var(--action-primary-soft);
+      border-color: var(--action-primary);
+      color: var(--action-primary);
+    }
+    .view { display: none; min-height: calc(100vh - 42px); }
+    .view.is-on { display: flex; flex-direction: column; }
+
+    .cinema-bar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 10px clamp(16px, 3vw, 40px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .logo {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .logo span { color: var(--action-primary); }
+    .modes {
+      display: flex; gap: 4px;
+      background: var(--surface-elevated);
+      border-radius: 999px;
+      padding: 3px;
+      border: 1px solid var(--border-subtle);
+    }
+    .modes span {
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: var(--caption);
+      color: var(--text-muted);
+    }
+    .modes span.on {
+      background: var(--action-primary-soft);
+      color: var(--action-primary);
+    }
+    .ghost {
+      margin-left: auto;
+      font-size: var(--caption);
+      color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+    }
+
+    .stage-wrap {
+      flex: 1;
+      display: grid;
+      place-items: center;
+      padding: 20px clamp(16px, 4vw, 64px) 12px;
+      background:
+        radial-gradient(ellipse at center, #141820 0%, #050607 70%);
+    }
+    .stage {
+      width: min(1100px, 100%);
+      aspect-ratio: 16 / 9;
+      border-radius: 4px;
+      border: 1px dashed var(--action-primary);
+      background: #000;
+      display: grid;
+      place-items: center;
+      color: var(--action-primary);
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      box-shadow: 0 0 0 1px rgba(232,165,75,0.08), 0 40px 80px rgba(0,0,0,0.65);
+      position: relative;
+    }
+    .stage.portrait {
+      width: min(360px, 70vw);
+      aspect-ratio: 9 / 16;
+      max-height: 62vh;
+    }
+    .stage-meta {
+      position: absolute; left: 16px; bottom: 16px;
+      text-align: left; color: var(--text-primary);
+      font-family: var(--font-body);
+    }
+    .stage-meta h1 {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      margin: 0 0 4px;
+      text-shadow: 0 2px 12px #000;
+    }
+    .stage-meta p { margin: 0; font-size: var(--caption); color: #c8ccd4; }
+
+    .strip {
+      padding: 12px clamp(16px, 3vw, 40px) 20px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      background: #0a0c10;
+    }
+    .strip-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 10px;
+    }
+    .strip-head h2 {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      margin: 0;
+      font-weight: 600;
+    }
+    .strip-head span {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .strip-row {
+      display: flex; gap: 10px; overflow: hidden;
+    }
+    .bead {
+      flex: 0 0 140px; height: 78px;
+      border-radius: 4px;
+      border: 1px dashed rgba(255,255,255,0.2);
+      background: var(--surface-card);
+      display: grid; place-items: center;
+      font-family: ui-monospace, monospace;
+      font-size: 10px; color: var(--text-muted);
+    }
+    .bead.on {
+      border-color: var(--action-primary);
+      color: var(--action-primary);
+      background: var(--action-primary-soft);
+    }
+
+    .floor {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      padding: 0 clamp(16px, 3vw, 40px) 24px;
+      align-items: center;
+    }
+    .btn {
+      border: 1px solid var(--border-subtle);
+      background: transparent;
+      color: var(--text-primary);
+      border-radius: 999px;
+      padding: 10px 14px;
+      font: inherit;
+      font-size: var(--caption);
+    }
+    .btn.primary {
+      background: var(--action-primary);
+      border-color: var(--action-primary);
+      color: #1a1208;
+      font-weight: 600;
+    }
+    .whisper {
+      margin-left: auto;
+      font-size: var(--caption);
+      color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+    }
+    .ann {
+      margin: 0 clamp(16px, 3vw, 40px) 28px;
+      padding: 10px 12px;
+      border-left: 2px solid var(--action-primary);
+      color: var(--text-muted);
+      font-size: var(--caption);
+    }
+
+    .library-stack {
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 24px 16px 40px;
+    }
+    .stack-item {
+      display: grid;
+      grid-template-columns: 120px 1fr auto;
+      gap: 14px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px dashed rgba(255,255,255,0.16);
+      background: rgba(26,31,40,0.7);
+    }
+    .stack-item .th {
+      height: 68px;
+      border-radius: 4px;
+      border: 1px dashed rgba(255,255,255,0.2);
+      display: grid; place-items: center;
+      font-family: ui-monospace, monospace;
+      font-size: 10px; color: var(--text-muted);
+    }
+    .stack-item h3 {
+      margin: 0 0 4px;
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+    }
+    .stack-item p { margin: 0; color: var(--text-muted); font-size: var(--caption); }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <strong>B · Cinema stage</strong>
+    <span>Watch-first · chrome collapses · broadcast darkroom</span>
+    <a href="compare.html">← compare</a>
+    <div class="tabs">
+      <button type="button" data-view="stage" aria-pressed="true">Stage</button>
+      <button type="button" data-view="browse" aria-pressed="false">Browse timeline</button>
+    </div>
+  </div>
+
+  <div id="stage" class="view is-on">
+    <div class="cinema-bar">
+      <div class="logo">Reels<span>.</span></div>
+      <div class="modes">
+        <span class="on">Assistir</span>
+        <span>Biblioteca</span>
+        <span>Jobs</span>
+      </div>
+      <div class="ghost">[ search · whisper ]</div>
+    </div>
+
+    <div class="stage-wrap">
+      <div class="stage">
+        STAGE · active media
+        <div class="stage-meta">
+          <h1>Highlight · clutch round</h1>
+          <p>Clip · Desktop · 1:08</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="strip">
+      <div class="strip-head">
+        <h2>Próximos / relacionados</h2>
+        <span>timeline strip · horizontal</span>
+      </div>
+      <div class="strip-row">
+        <div class="bead on">now</div>
+        <div class="bead">next</div>
+        <div class="bead">next</div>
+        <div class="bead">VOD</div>
+        <div class="bead">clip</div>
+        <div class="bead">clip</div>
+      </div>
+    </div>
+
+    <div class="floor">
+      <button type="button" class="btn primary">Criar clip</button>
+      <button type="button" class="btn">Trim</button>
+      <button type="button" class="btn">Publicar</button>
+      <button type="button" class="btn">Legendas</button>
+      <button type="button" class="btn">⋮</button>
+      <span class="whisper">job · transform 42%</span>
+    </div>
+    <p class="ann">Annotation: home is not a feed — entering the app lands on last/active media. Library is a secondary mode (timeline or vertical stack). Actions float as a cinema floor, not a dense toolbar.</p>
+  </div>
+
+  <div id="browse" class="view">
+    <div class="cinema-bar">
+      <div class="logo">Reels<span>.</span></div>
+      <div class="modes">
+        <span>Assistir</span>
+        <span class="on">Biblioteca</span>
+        <span>Jobs</span>
+      </div>
+      <div class="ghost">chrono · newest first</div>
+    </div>
+    <div class="library-stack">
+      <div class="stack-item">
+        <div class="th">16:9</div>
+        <div>
+          <h3>VOD · ranked night</h3>
+          <p>original · 2h 14m</p>
+        </div>
+        <button type="button" class="btn">Abrir</button>
+      </div>
+      <div class="stack-item">
+        <div class="th">9:16</div>
+        <div>
+          <h3>Clip mobile · ace</h3>
+          <p>reels · 0:41</p>
+        </div>
+        <button type="button" class="btn">Abrir</button>
+      </div>
+      <div class="stack-item">
+        <div class="th">16:9</div>
+        <div>
+          <h3>Clip desktop · clutch</h3>
+          <p>youtube · 1:08</p>
+        </div>
+        <button type="button" class="btn primary">No stage</button>
+      </div>
+      <div class="stack-item">
+        <div class="th">16:9</div>
+        <div>
+          <h3>VOD · casual</h3>
+          <p>original · 48m</p>
+        </div>
+        <button type="button" class="btn">Abrir</button>
+      </div>
+    </div>
+    <p class="ann">Annotation: browse is a vertical chronology, not Netflix rows — fewer parallel sections, stronger “now playing” continuity when returning to Stage.</p>
+  </div>
+
+  <script>
+    const buttons = document.querySelectorAll(".tabs button");
+    const views = { stage: document.getElementById("stage"), browse: document.getElementById("browse") };
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.view;
+        buttons.forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+        Object.entries(views).forEach(([key, el]) => el.classList.toggle("is-on", key === id));
+      });
+    });
+  </script>
+</body>
+</html>

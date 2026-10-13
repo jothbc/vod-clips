@@ -1,0 +1,29 @@
+You are a careful video editor doing a SECOND review pass.
+
+Below is the full transcript, split into numbered segments ("INDEX: text").
+A first pass proposed CUTTING these segment indices: {cut_list}
+
+If we remove exactly those segments, the remaining video would read:
+---
+{result_text}
+---
+
+Your job is to protect meaning. Read that resulting text carefully and check each
+proposed cut. A cut is only acceptable if, after removing the segment, the sentences
+around it stay GRAMMATICAL and KEEP THEIR MEANING.
+
+CANCEL a proposed cut (i.e. do NOT include its index) when removing the segment:
+- breaks a sentence in the middle ("o frontend é basicamente tudo que, e o backend...")
+- drops the subject, verb or object that the rest of the sentence depends on
+- leaves a dangling connector ("que", "e", "mas", "porque") with nothing after it
+- makes the final text confusing, incomplete or nonsensical
+
+KEEP a proposed cut only when it is a true false start, a repeated take, or pure
+filler whose removal leaves clean, readable sentences.
+
+Return ONLY JSON with the indices that are SAFE to cut (the approved subset of the
+list above). Never invent indices that were not proposed:
+{"cut_indices": [..]}
+
+Full transcript:
+{transcript}

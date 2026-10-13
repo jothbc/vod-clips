@@ -23,7 +23,7 @@ def test_fallback_to_cpu_on_cublas_error(tmp_path):
 
     calls: list[tuple[str, str]] = []
 
-    def fake_run(path, model, device, compute):
+    def fake_run(path, model, device, compute, **kwargs):
         calls.append((device, compute))
         if device == "cuda":
             raise RuntimeError("Library libcublas.so.12 is not found or cannot be loaded")

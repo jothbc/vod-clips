@@ -1,0 +1,27 @@
+preset: smoke
+
+# Fast CPU preset for E2E smoke tests (5 min VOD).
+hardware:
+  whisper_device: cpu
+  whisper_model: medium
+  whisper_compute_type: int8
+  ffmpeg_video_encoder: libx264
+  whisper_chunk_minutes: 5
+
+analysis:
+  mode: gaming
+  scene_detection: false
+  max_vlm_windows: 0
+
+clip:
+  max_clips: 2
+
+proxy:
+  video_mode: audio_only
+  make_preview: false
+
+cleanup:
+  use_llm: false
+
+publish:
+  llm_model: llama3.2:3b

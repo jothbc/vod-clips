@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
+import stat
+import sys
+import time
 import uuid
 from pathlib import Path
+
+_JOB_ID_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 TEMP_DIR_NAME = "temp"
 VODS_SUBDIR = "vods"
 OUTPUTS_SUBDIR = "outputs"
 CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024  # 50 GB
+# Windows often keeps a video handle open for a moment after the player stops.
+_DELETE_ATTEMPTS = 6
+_DELETE_BACKOFF_S = 0.25
 
 
 def project_root() -> Path:
@@ -91,25 +101,116 @@ async def stream_upload_to_temp(file_obj, filename: str) -> tuple[Path, int]:
 
 
 def delete_path(path: Path) -> int:
-    """Remove file or directory tree; return bytes freed (estimate)."""
+    """Remove a file or directory tree and return the bytes freed.
+
+    Raises OSError when the path is still present after retries. A locked file
+    must not be reported as deleted: callers (and the next startup sync) would
+    treat the video as gone while the bytes stay on disk.
+    """
     path = path.resolve()
     if not path.exists():
         return 0
 
-    freed = 0
-    if path.is_file():
-        freed = path.stat().st_size
-        path.unlink()
-        return freed
+    freed = _bytes_under(path)
+    last_error: BaseException | None = None
+    for attempt in range(_DELETE_ATTEMPTS):
+        try:
+            if path.is_dir() and not path.is_symlink():
+                _rmtree(path)
+            else:
+                _force_writable(path)
+                path.unlink()
+        except FileNotFoundError:
+            return freed
+        except OSError as exc:
+            last_error = exc
+        if not path.exists():
+            return freed
+        if attempt + 1 < _DELETE_ATTEMPTS:
+            time.sleep(_DELETE_BACKOFF_S * (attempt + 1))
+    raise OSError(f"Could not delete {path}") from last_error
 
-    for p in path.rglob("*"):
-        if p.is_file():
+
+def _bytes_under(path: Path) -> int:
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for child in path.rglob("*"):
+        if child.is_file():
             try:
-                freed += p.stat().st_size
+                total += child.stat().st_size
             except OSError:
                 pass
-    shutil.rmtree(path, ignore_errors=True)
-    return freed
+    return total
+
+
+def _force_writable(path: Path) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+
+
+def _retry_writable(func, target, _exc) -> None:
+    _force_writable(Path(target))
+    func(target)
+
+
+def _rmtree(path: Path) -> None:
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_retry_writable)
+        return
+
+    def _onerror(func, target, _exc_info):
+        _retry_writable(func, target, None)
+
+    shutil.rmtree(path, onerror=_onerror)
+
+
+def list_stored_vods() -> list[dict]:
+    """List uploaded .mp4 files in temp/vods."""
+    items: list[dict] = []
+    root = temp_vods_dir()
+    for path in root.glob("*.mp4"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append(
+            {
+                "path": str(path.resolve()),
+                "filename": path.name,
+                "size_bytes": stat.st_size,
+                "modified": stat.st_mtime,
+            }
+        )
+    items.sort(key=lambda x: x["modified"], reverse=True)
+    return items
+
+
+def delete_stored_vod(path_str: str) -> dict:
+    """Delete one VOD under temp/vods."""
+    path = Path(path_str).expanduser().resolve()
+    if not is_under_temp_vods(path):
+        raise ValueError("Path must be under temp/vods")
+    if not path.is_file():
+        raise FileNotFoundError(f"VOD not found: {path}")
+    freed = delete_path(path)
+    return {"deleted": True, "bytes_freed": freed}
+
+
+def delete_reel_job_output(job_id: str) -> dict:
+    """Remove one exported session folder under temp/outputs."""
+    if not _JOB_ID_RE.match(job_id) or ".." in job_id:
+        raise ValueError("Invalid job id")
+    job_dir = temp_outputs_dir() / job_id
+    if not job_dir.is_dir():
+        raise FileNotFoundError(f"Job output not found: {job_id}")
+    freed = delete_path(job_dir)
+    return {"deleted": True, "bytes_freed": freed}
 
 
 def cleanup_job_files(video_path: str | None, output_dir: str | None) -> dict:

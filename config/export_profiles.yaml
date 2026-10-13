@@ -7,7 +7,7 @@ youtube:
   nvenc_preset: p5
   nvenc_cq: 20
   crf: 23
-  preset: medium
+  preset: fast
   audio_codec: aac
   audio_bitrate: 192k
   max_duration: 600
@@ -21,7 +21,7 @@ reels:
   nvenc_preset: p5
   nvenc_cq: 22
   crf: 24
-  preset: medium
+  preset: fast
   audio_codec: aac
   audio_bitrate: 128k
   max_duration: 90

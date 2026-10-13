@@ -216,6 +216,7 @@ export interface TrimJobBody {
   keep_spans: [number, number][];
   source_format?: "reels" | "youtube";
   use_nvenc?: boolean;
+  force_reencode?: boolean;
 }
 
 export interface SystemStatus {
@@ -324,6 +325,17 @@ export function deleteVideo(id: string): Promise<{ deleted: boolean; video_id: s
   return v2Fetch(`/api/v2/videos/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export function renameVideo(
+  id: string,
+  body: { title?: string; slug?: string },
+): Promise<{ video_id: string; uuid: string; slug: string; title: string }> {
+  return v2Fetch(`/api/v2/videos/${encodeURIComponent(id)}/rename`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function postMetadata(id: string): Promise<MetadataJobResponse> {
   return v2Fetch(`/api/v2/videos/${encodeURIComponent(id)}/metadata`, { method: "POST" });
 }
@@ -396,6 +408,54 @@ export function postTrimFinalize(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode }),
+  });
+}
+
+export type StagedFinalizeMode = "new_vod" | "replace" | "new_clip";
+
+export function captionsPreviewUrl(jobId: string): string {
+  return apiUrl(`/api/v2/jobs/${encodeURIComponent(jobId)}/captions/preview`);
+}
+
+export function postCaptionsFinalize(
+  jobId: string,
+  mode: StagedFinalizeMode
+): Promise<{ job_id: string; mode: string; video_id: string }> {
+  return v2Fetch(`/api/v2/jobs/${encodeURIComponent(jobId)}/captions/finalize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function cleanupPreviewUrl(jobId: string): string {
+  return apiUrl(`/api/v2/jobs/${encodeURIComponent(jobId)}/cleanup/preview`);
+}
+
+export function postCleanupFinalize(
+  jobId: string,
+  mode: StagedFinalizeMode
+): Promise<{ job_id: string; mode: string; video_id: string }> {
+  return v2Fetch(`/api/v2/jobs/${encodeURIComponent(jobId)}/cleanup/finalize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export interface CreateClipBody {
+  start: number;
+  end: number;
+  title?: string;
+  burn_captions?: boolean;
+  use_nvenc?: boolean;
+}
+
+export function postCreateClip(id: string, body: CreateClipBody): Promise<JobStartResponse> {
+  return v2Fetch(`/api/v2/videos/${encodeURIComponent(id)}/create-clip`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
@@ -740,4 +800,95 @@ export async function uploadVideoV2(
     xhr.onerror = () => reject(new Error("Upload network error"));
     xhr.send(form);
   });
+}
+
+export interface TwitchDownloadState {
+  id: string;
+  url: string;
+  video_id?: string;
+  status: string;
+  percent: number;
+  message: string;
+  path: string;
+  filename: string;
+  size_bytes: number;
+  error: string | null;
+  queue_position?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function startTwitchDownload(url: string): Promise<{ download_id: string }> {
+  const r = await fetch(apiUrl("/api/twitch/download"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url.trim() }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+
+export async function startTwitchDownloadBatch(
+  urls: string[]
+): Promise<{ download_ids: string[]; downloads: TwitchDownloadState[] }> {
+  const r = await fetch(apiUrl("/api/twitch/download/batch"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+
+export async function fetchTwitchDownloads(): Promise<{ downloads: TwitchDownloadState[] }> {
+  const r = await fetch(apiUrl("/api/twitch/downloads"));
+  if (!r.ok) throw new Error("Failed to list downloads");
+  return r.json();
+}
+
+export async function cancelTwitchDownload(
+  downloadId: string
+): Promise<{ download_id: string; status: string }> {
+  const r = await fetch(apiUrl(`/api/twitch/download/${downloadId}/cancel`), {
+    method: "POST",
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+
+export async function getTwitchDownload(downloadId: string): Promise<TwitchDownloadState> {
+  const r = await fetch(apiUrl(`/api/twitch/download/${downloadId}`));
+  if (!r.ok) throw new Error("Download not found");
+  return r.json();
+}
+
+export function subscribeTwitchDownloadEvents(
+  downloadId: string,
+  onUpdate: (state: TwitchDownloadState) => void,
+  onError?: (err: Error) => void
+): () => void {
+  const es = new EventSource(apiUrl(`/api/twitch/download/${downloadId}/events`));
+
+  es.onmessage = (ev) => {
+    try {
+      onUpdate(JSON.parse(ev.data) as TwitchDownloadState);
+    } catch (e) {
+      onError?.(e instanceof Error ? e : new Error(String(e)));
+    }
+  };
+
+  es.onerror = () => {
+    // EventSource reconnects automatically; one status pull covers the gap without a poll storm.
+    if (es.readyState === EventSource.CLOSED) {
+      getTwitchDownload(downloadId)
+        .then(onUpdate)
+        .catch(() => {});
+      onError?.(new Error("SSE connection closed"));
+    }
+  };
+
+  return () => es.close();
 }

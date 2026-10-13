@@ -29,12 +29,12 @@ test.describe("Clip watch page e2e", () => {
     expect(items[0].id).toBe(PARENT_ID);
   });
 
-  test("clip page loads player and shows parent in sidebar", async ({ page }) => {
+  test("clip page loads player and shows parent in ops related", async ({ page }) => {
     await page.goto(CLIP_URL);
     await expect(page.locator(".v2-watch-title")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator(".v2-sidebar-title")).toContainText(/VOD original/i);
-    await expect(page.locator(".v2-related-card")).toHaveCount(1);
-    await expect(page.locator(".v2-related-card")).toContainText(PARENT_ID.replace(/_/g, " ").slice(0, 10));
+    await expect(page.locator(".v2-bay-ops-title").filter({ hasText: /^Related$/i })).toBeVisible();
+    await expect(page.locator(".v2-bay-related")).toHaveCount(1);
+    await expect(page.locator(".v2-bay-related")).toContainText(PARENT_ID.replace(/_/g, " ").slice(0, 10));
     await expect(page.locator(".v2-player-wrap video")).toBeVisible();
   });
 });

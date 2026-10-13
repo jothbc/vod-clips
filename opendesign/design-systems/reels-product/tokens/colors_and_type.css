@@ -1,0 +1,56 @@
+/* Reels product — extracted from web/src/v2/v2.css
+   Display: Fraunces | Body: Instrument Sans | Accent: warm amber */
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap");
+
+:root {
+  /* Raw */
+  --fg-1: #e8eaed;
+  --fg-2: #8b929e;
+  --bg-1: #0c0e11;
+  --bg-2: #14181f;
+  --bg-3: #1a1f28;
+  --border-1: rgba(255, 255, 255, 0.08);
+  --accent-1: #e8a54b;
+  --accent-1-dim: rgba(232, 165, 75, 0.15);
+  --success-1: #3d9b8f;
+  --danger-1: #e05c5c;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Instrument Sans", system-ui, sans-serif;
+  --radius-sm: 10px;
+  --radius-lg: 16px;
+  --shadow-1: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --type-xs: 0.75rem;
+  --type-sm: 0.875rem;
+  --type-md: 0.9375rem;
+  --type-lg: 1.125rem;
+  --type-xl: 1.35rem;
+  --type-2xl: 1.75rem;
+  --type-3xl: 2.25rem;
+
+  /* Semantic */
+  --surface-primary: var(--bg-1);
+  --surface-elevated: var(--bg-2);
+  --surface-card: var(--bg-3);
+  --border-subtle: var(--border-1);
+  --text-primary: var(--fg-1);
+  --text-muted: var(--fg-2);
+  --action-primary: var(--accent-1);
+  --action-primary-soft: var(--accent-1-dim);
+  --status-ok: var(--success-1);
+  --status-warn: var(--accent-1);
+  --status-error: var(--danger-1);
+  --h1: var(--type-2xl);
+  --h2: var(--type-xl);
+  --h3: var(--type-lg);
+  --body: var(--type-md);
+  --caption: var(--type-sm);
+  --label: var(--type-xs);
+}

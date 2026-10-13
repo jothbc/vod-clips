@@ -9,6 +9,8 @@ from urllib.parse import urlencode
 
 import httpx
 
+from reels.http_util import http_client
+
 GRAPH = "https://graph.facebook.com/v21.0"
 
 
@@ -62,7 +64,7 @@ def exchange_code(
     app_id, app_secret, redirect_uri = _client_config(
         client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri
     )
-    with httpx.Client(timeout=60.0) as client:
+    with http_client(timeout=60.0) as client:
         r = client.get(
             f"{GRAPH}/oauth/access_token",
             params={
@@ -86,7 +88,7 @@ def publish_reel(
     """Two-step Reels publish using a public video URL."""
     if not ig_user_id:
         raise ValueError("Instagram ig_user_id is required in target config")
-    with httpx.Client(timeout=120.0) as client:
+    with http_client(timeout=120.0) as client:
         create = client.post(
             f"{GRAPH}/{ig_user_id}/media",
             data={

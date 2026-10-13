@@ -24,7 +24,6 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(storage_mod, "project_root", lambda: root)
     monkeypatch.setattr(storage_mod, "temp_root", lambda: tmp_path / "temp")
     monkeypatch.setattr(vs, "videos_root", lambda: tmp_path / "video")
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
     (tmp_path / "temp").mkdir(parents=True)
     vs.videos_root().mkdir(parents=True)
@@ -68,7 +67,6 @@ def test_update_and_delete_target(client):
 
 
 def test_credentials_encrypt_roundtrip(client, monkeypatch, tmp_path):
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
     created = client.post(
         "/api/v2/publish/targets",
@@ -130,7 +128,6 @@ def test_post_publish_clip_uses_clip_file(client, monkeypatch):
 
 
 def test_oauth_config_stored_encrypted(client, tmp_path, monkeypatch):
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
     r = client.post(
         "/api/v2/publish/targets",
@@ -157,7 +154,6 @@ def test_oauth_config_stored_encrypted(client, tmp_path, monkeypatch):
 
 
 def test_auth_start_uses_wallet_oauth(client, monkeypatch, tmp_path):
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
     created = client.post(
         "/api/v2/publish/targets",
@@ -178,7 +174,6 @@ def test_auth_start_uses_wallet_oauth(client, monkeypatch, tmp_path):
 
 
 def test_test_upload_youtube(client, monkeypatch, tmp_path):
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
     created = client.post(
         "/api/v2/publish/targets",

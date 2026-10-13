@@ -192,7 +192,7 @@ class VideoTranscript(BaseModel):
     segments_original: list[dict[str, Any]] = Field(default_factory=list)
 
 
-ClipSourceFeature = Literal["highlight", "captions", "cleanup", "trim", "reformat"]
+ClipSourceFeature = Literal["highlight", "captions", "cleanup", "trim", "reformat", "manual_clip"]
 
 
 class ClipMetadata(BaseModel):

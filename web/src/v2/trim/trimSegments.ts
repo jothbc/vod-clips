@@ -65,6 +65,53 @@ export function toKeepSpans(segments: TrimSegment[]): [number, number][] {
   return segments.map((s) => [s.start, s.end] as [number, number]);
 }
 
+/** Clamp segment bounds into [0, duration], dropping empty leftovers. */
+export function clampSegmentsToDuration(
+  segments: TrimSegment[],
+  duration: number
+): TrimSegment[] {
+  const dur = Math.max(0, duration);
+  const next: TrimSegment[] = [];
+  for (const seg of segments) {
+    const start = Math.max(0, Math.min(dur, seg.start));
+    const end = Math.max(0, Math.min(dur, seg.end));
+    if (end - start < MIN_TRIM_SEGMENT_SEC) continue;
+    next.push({ ...seg, start, end });
+  }
+  return next.length ? next : initialSegments(dur);
+}
+
+/** Prefer the shorter known duration (API vs HTMLMediaElement) to avoid EOF overshoot. */
+export function resolveTrimDuration(apiDuration: number, mediaDuration: number): number {
+  const api = Number.isFinite(apiDuration) && apiDuration > 0 ? apiDuration : 0;
+  const media = Number.isFinite(mediaDuration) && mediaDuration > 0 ? mediaDuration : 0;
+  if (api > 0 && media > 0) return Math.min(api, media);
+  return Math.max(api, media, 0.01);
+}
+
+/** True when playlist order is chronological removals only (no reorder/dup/overlap). */
+export function isSimpleChronologicalKeep(segments: TrimSegment[]): boolean {
+  if (!segments.length) return false;
+  const spans = toKeepSpans(segments);
+  const chronological = [...spans].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  for (let i = 0; i < spans.length; i++) {
+    if (spans[i][0] !== chronological[i][0] || spans[i][1] !== chronological[i][1]) {
+      return false;
+    }
+  }
+  for (let i = 0; i < spans.length - 1; i++) {
+    const [start, end] = spans[i];
+    const [nextStart, nextEnd] = spans[i + 1];
+    if (Math.abs(start - nextStart) < 1e-6 && Math.abs(end - nextEnd) < 1e-6) {
+      return false;
+    }
+    if (end > nextStart + MIN_TRIM_SEGMENT_SEC) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function mergedTimeRanges(segments: TrimSegment[]): [number, number][] {
   const sorted = [...segments]
     .map((s) => [s.start, s.end] as [number, number])

@@ -59,11 +59,19 @@ TRANSFORM_REEL_PHASE_WEIGHTS: dict[str, int] = {
     "render": 95,
 }
 
+CREATE_CLIP_PHASE_WEIGHTS: dict[str, int] = {
+    "probe": 5,
+    "export": 55,
+    "transcribe": 25,
+    "captions": 15,
+}
+
 FEATURE_PHASE_WEIGHTS: dict[str, dict[str, int]] = {
     "v2_cleanup": CLEANUP_PHASE_WEIGHTS,
     "v2_captions": CAPTIONS_PHASE_WEIGHTS,
     "v2_trim": TRIM_PHASE_WEIGHTS,
     "v2_transform_reel": TRANSFORM_REEL_PHASE_WEIGHTS,
+    "v2_create_clip": CREATE_CLIP_PHASE_WEIGHTS,
     "publish": PUBLISH_PHASE_WEIGHTS,
 }
 

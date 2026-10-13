@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import type { TwitchDownloadState } from "../../api/client";
+import type { TwitchDownloadState } from "../../api/v2";
 import { useTwitchDownloadQueue } from "../../hooks/useTwitchDownloadQueue";
-import { deleteVideo, fetchGallery, uploadVideoV2, type GalleryVideo } from "../../api/v2";
+import { deleteVideo, fetchGallery, renameVideo, uploadVideoV2, type GalleryVideo } from "../../api/v2";
+import { queryKeys } from "../../queryClient";
+import { useBay } from "../context/BayContext";
 
 interface Props {
   apiReady: boolean;
@@ -17,11 +20,30 @@ type PendingDelete = {
   clipCount?: number;
 };
 
+type PendingRename = {
+  id: string;
+  title: string;
+};
+
 function TrashIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7h12Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -57,6 +79,58 @@ function DeleteConfirm({
   );
 }
 
+function RenameEditor({
+  value,
+  busy,
+  onChange,
+  onConfirm,
+  onCancel,
+}: {
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <form
+      className="v2-gallery-rename"
+      onClick={(e) => e.stopPropagation()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onConfirm();
+      }}
+    >
+      <input
+        ref={inputRef}
+        className="v2-gallery-rename-input"
+        value={value}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        aria-label="Novo título"
+      />
+      <button type="button" className="v2-btn v2-btn--ghost" disabled={busy} onClick={onCancel}>
+        Cancelar
+      </button>
+      <button type="submit" className="v2-btn v2-btn--primary" disabled={busy || !value.trim()}>
+        {busy ? "…" : "Salvar"}
+      </button>
+    </form>
+  );
+}
+
 function twitchStatusLabel(status: string): string {
   switch (status) {
     case "queued":
@@ -79,8 +153,65 @@ function isActiveTwitchStatus(status: string): boolean {
   return status === "queued" || status === "downloading" || status === "running";
 }
 
+function playbackUsesVideo(src: string, videoId: string): boolean {
+  let decoded = videoId;
+  try {
+    decoded = decodeURIComponent(videoId);
+  } catch {
+    decoded = videoId;
+  }
+  if (decoded.includes("::")) {
+    const [parent, clip] = decoded.split("::", 2);
+    return src.includes(`/media/${parent}/clips/${clip}/`);
+  }
+  return src.includes(`/media/${decoded}/`);
+}
+
+function releasePlayback(videoId: string, getWatchVideo: () => HTMLVideoElement | null): boolean {
+  const el = getWatchVideo();
+  if (!el) return false;
+  const src = el.currentSrc || el.src || "";
+  if (!playbackUsesVideo(src, videoId)) return false;
+  el.pause();
+  el.removeAttribute("src");
+  el.load();
+  return true;
+}
+
+function decodeJsonEscapes(value: string): string {
+  return value.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
+}
+
+function humanizeTwitchError(raw: string): string {
+  const decoded = decodeJsonEscapes(raw.trim());
+  const start = decoded.indexOf("{");
+  const end = decoded.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try {
+      const parsed = JSON.parse(decoded.slice(start, end + 1)) as {
+        error?: { code?: string; message?: string } | string;
+        message?: string;
+      };
+      const err = parsed.error;
+      const message =
+        (typeof err === "object" && err?.message ? err.message : "") ||
+        (typeof parsed.message === "string" ? parsed.message : "");
+      const code = typeof err === "object" ? err?.code : "";
+      if (code === "NOT_FOUND" || /n[aã]o encontrado/i.test(message)) {
+        return "VOD não encontrado na Twitch. Ele pode ter sido apagado ou o link expirou.";
+      }
+      if (message.trim()) return message.trim();
+    } catch {
+      // Fall through to the decoded text.
+    }
+  }
+  return decoded;
+}
+
 function twitchErrorText(d: TwitchDownloadState): string {
-  return (d.error || d.message || "").trim();
+  return humanizeTwitchError(d.error || d.message || "");
 }
 
 function TwitchDownloadItem({
@@ -132,40 +263,44 @@ function TwitchDownloadItem({
 }
 
 export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
-  const [videos, setVideos] = useState<GalleryVideo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { getWatchVideo } = useBay();
+  const [actionError, setActionError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [urlText, setUrlText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingRename, setPendingRename] = useState<PendingRename | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hadActiveDownloads = useRef(false);
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
-    setError(null);
-    try {
-      const data = await fetchGallery();
-      setVideos(data.videos);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao carregar galeria");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const galleryQuery = useQuery({
+    queryKey: queryKeys.gallery,
+    queryFn: fetchGallery,
+    enabled: apiReady,
+    staleTime: 5_000,
+  });
+
+  const videos: GalleryVideo[] = galleryQuery.data?.videos ?? [];
+  const loading = galleryQuery.isLoading;
+  const error =
+    actionError ??
+    (galleryQuery.error instanceof Error ? galleryQuery.error.message : null);
+
+  const invalidateGallery = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.gallery });
+    onChangedRef.current();
+  }, [queryClient]);
 
   const handleDownloadCompleted = useCallback(
     (state: TwitchDownloadState) => {
-      void load({ silent: true });
-      onChanged();
+      void invalidateGallery();
       if (state.video_id) {
         setExpanded((prev) => {
           const next = new Set(prev);
@@ -174,47 +309,21 @@ export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
         });
       }
     },
-    [load, onChanged],
+    [invalidateGallery],
   );
 
   const { downloads, error: twitchQueueError, submitting, enqueueUrls, cancel, refresh: refreshTwitch } =
     useTwitchDownloadQueue(apiReady, { onDownloadCompleted: handleDownloadCompleted });
 
-  useEffect(() => {
-    if (apiReady) void load();
-  }, [apiReady, load]);
-
   const hasActiveDownloads = downloads.some((d) => isActiveTwitchStatus(d.status));
 
-  useEffect(() => {
-    if (!apiReady || !hasActiveDownloads) return;
-    const timer = setInterval(() => {
-      refreshTwitch();
-      void load({ silent: true });
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [apiReady, hasActiveDownloads, refreshTwitch, load]);
-
-  // Refresh library when the last active download finishes (covers missed SSE events).
+  // When the last active download finishes, refresh library once (SSE may already have fired).
   useEffect(() => {
     if (hadActiveDownloads.current && !hasActiveDownloads) {
-      void load({ silent: true });
-      onChanged();
+      void invalidateGallery();
     }
     hadActiveDownloads.current = hasActiveDownloads;
-  }, [hasActiveDownloads, load, onChanged]);
-
-  const prevDownloadStatus = useRef<Map<string, string>>(new Map());
-  useEffect(() => {
-    for (const d of downloads) {
-      const prev = prevDownloadStatus.current.get(d.id);
-      if (d.status === "completed" && prev !== "completed") {
-        void load({ silent: true });
-        onChanged();
-      }
-      prevDownloadStatus.current.set(d.id, d.status);
-    }
-  }, [downloads, load, onChanged]);
+  }, [hasActiveDownloads, invalidateGallery]);
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -226,15 +335,27 @@ export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
   }
 
   function requestDelete(item: PendingDelete) {
+    setPendingRename(null);
     setPendingDelete(item);
-    setError(null);
+    setActionError(null);
+  }
+
+  function requestRename(item: PendingRename) {
+    setPendingDelete(null);
+    setPendingRename(item);
+    setRenameDraft(item.title);
+    setActionError(null);
   }
 
   async function confirmDelete() {
     if (!pendingDelete) return;
     setDeleting(true);
-    setError(null);
+    setActionError(null);
     try {
+      const released = releasePlayback(pendingDelete.id, getWatchVideo);
+      if (released) {
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      }
       await deleteVideo(pendingDelete.id);
       if (pendingDelete.kind === "vod") {
         setExpanded((prev) => {
@@ -244,25 +365,101 @@ export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
         });
       }
       setPendingDelete(null);
-      onChanged();
-      await load({ silent: true });
+      await invalidateGallery();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao excluir");
+      setActionError(e instanceof Error ? e.message : "Erro ao excluir");
     } finally {
       setDeleting(false);
     }
   }
 
+  async function confirmRename() {
+    if (!pendingRename) return;
+    const title = renameDraft.trim();
+    if (!title || title === pendingRename.title) {
+      setPendingRename(null);
+      return;
+    }
+    setRenaming(true);
+    setActionError(null);
+    try {
+      await renameVideo(pendingRename.id, { title });
+      setPendingRename(null);
+      await invalidateGallery();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Erro ao renomear");
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  function renderRowActions(item: { id: string; title: string }, deleteMeta: PendingDelete) {
+    if (pendingRename?.id === item.id) {
+      return (
+        <RenameEditor
+          value={renameDraft}
+          busy={renaming}
+          onChange={setRenameDraft}
+          onConfirm={() => void confirmRename()}
+          onCancel={() => setPendingRename(null)}
+        />
+      );
+    }
+    if (pendingDelete?.id === item.id) {
+      return (
+        <DeleteConfirm
+          label={
+            deleteMeta.kind === "vod"
+              ? deleteMeta.clipCount && deleteMeta.clipCount > 0
+                ? `VOD + ${deleteMeta.clipCount} clip${deleteMeta.clipCount !== 1 ? "s" : ""}`
+                : "VOD"
+              : "Clip"
+          }
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      );
+    }
+    return (
+      <>
+        <button
+          type="button"
+          className="v2-gallery-icon-btn"
+          title="Renomear"
+          aria-label={`Renomear ${item.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            requestRename({ id: item.id, title: item.title });
+          }}
+        >
+          <PencilIcon />
+        </button>
+        <button
+          type="button"
+          className="v2-gallery-icon-btn v2-gallery-icon-btn--danger"
+          title={deleteMeta.kind === "vod" ? "Excluir VOD e todos os clips" : "Excluir clip"}
+          aria-label={`Excluir ${item.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            requestDelete(deleteMeta);
+          }}
+        >
+          <TrashIcon />
+        </button>
+      </>
+    );
+  }
+
   async function handleUpload(file: File) {
     setUploading(true);
     setUploadProgress(0);
-    setError(null);
+    setActionError(null);
     try {
       await uploadVideoV2(file, (loaded, total) => setUploadProgress(Math.round((loaded / total) * 100)));
-      onChanged();
-      await load();
+      await invalidateGallery();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload falhou");
+      setActionError(e instanceof Error ? e.message : "Upload falhou");
     } finally {
       setUploading(false);
       setUploadProgress(0);
@@ -277,7 +474,7 @@ export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
     if (!urls.length) return;
     await enqueueUrls(urls);
     setUrlText("");
-    refreshTwitch();
+    void refreshTwitch();
   }
 
   return (
@@ -378,35 +575,9 @@ export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
                         </span>
                       </div>
                       <div className="v2-gallery-actions">
-                        {pendingDelete?.id === v.id ? (
-                          <DeleteConfirm
-                            label={
-                              v.clip_count > 0
-                                ? `VOD + ${v.clip_count} clip${v.clip_count !== 1 ? "s" : ""}`
-                                : "VOD"
-                            }
-                            busy={deleting}
-                            onConfirm={confirmDelete}
-                            onCancel={() => setPendingDelete(null)}
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className="v2-gallery-delete"
-                            title="Excluir VOD e todos os clips"
-                            aria-label={`Excluir ${v.title}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              requestDelete({
-                                id: v.id,
-                                title: v.title,
-                                kind: "vod",
-                                clipCount: v.clip_count,
-                              });
-                            }}
-                          >
-                            <TrashIcon />
-                          </button>
+                        {renderRowActions(
+                          { id: v.id, title: v.title },
+                          { id: v.id, title: v.title, kind: "vod", clipCount: v.clip_count },
                         )}
                       </div>
                     </div>
@@ -428,26 +599,9 @@ export default function GalleryModal({ apiReady, onClose, onChanged }: Props) {
                               ))}
                             </div>
                             <div className="v2-gallery-actions">
-                              {pendingDelete?.id === c.id ? (
-                                <DeleteConfirm
-                                  label="Clip"
-                                  busy={deleting}
-                                  onConfirm={confirmDelete}
-                                  onCancel={() => setPendingDelete(null)}
-                                />
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="v2-gallery-delete"
-                                  title="Excluir clip"
-                                  aria-label={`Excluir ${c.title}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    requestDelete({ id: c.id, title: c.title, kind: "clip" });
-                                  }}
-                                >
-                                  <TrashIcon />
-                                </button>
+                              {renderRowActions(
+                                { id: c.id, title: c.title },
+                                { id: c.id, title: c.title, kind: "clip" },
                               )}
                             </div>
                           </li>

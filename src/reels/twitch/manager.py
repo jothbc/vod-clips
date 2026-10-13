@@ -102,6 +102,21 @@ class TwitchDownloadManager:
             now = _utc_now()
 
             if self._skip_existing and dest.is_file() and dest.stat().st_size >= 1000:
+                from reels.video_store import ensure_metadata, twitch_slug
+
+                # File may exist from a previous run that never registered metadata
+                # (e.g. failed finalize, manual move, or DB locked). Ensure gallery sees it.
+                try:
+                    ensure_metadata(
+                        twitch_slug(video_id),
+                        dest,
+                        title=f"Twitch VOD {video_id}",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to register metadata for existing Twitch VOD %s",
+                        video_id,
+                    )
                 state = TwitchDownloadState(
                     id=download_id,
                     url=canonical,

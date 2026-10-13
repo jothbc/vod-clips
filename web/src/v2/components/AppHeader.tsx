@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useJobs } from "../context/JobContext";
 import { useSystemStatus } from "../hooks/useSystemStatus";
 import { useSystemDock } from "./SystemDock";
 
@@ -13,6 +14,7 @@ export default function AppHeader({ onOpenGallery }: Props) {
   const [query, setQuery] = useState("");
   const { indicator } = useSystemStatus();
   const { toggleMobileOpen } = useSystemDock();
+  const { activeJobs } = useJobs();
 
   useEffect(() => {
     if (location.pathname === "/search") {
@@ -61,11 +63,12 @@ export default function AppHeader({ onOpenGallery }: Props) {
             Galeria
           </button>
         )}
+        <Link to="/jobs" className="v2-btn v2-btn--ghost v2-jobs-link">
+          Jobs
+          {activeJobs.length > 0 && <span className="v2-jobs-badge">{activeJobs.length}</span>}
+        </Link>
         <Link to="/publish/wallet" className="v2-btn v2-btn--ghost">
           Carteira
-        </Link>
-        <Link to="/old" className="v2-btn v2-btn--ghost">
-          UI legada
         </Link>
       </div>
     </header>

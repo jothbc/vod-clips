@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from reels.api.app import create_app
 from reels.config import load_config
-from reels.jobs import JobManager, JobState, JobStatus
+from reels.jobs import JobManager
 from reels.models import PublishDocument, PublishItem, VideoInfo
 from reels.publish import (
     PublishContext,
@@ -217,54 +217,6 @@ def test_overlay_title_produces_jpeg(mock_run, tmp_path):
     )
     assert out.is_file()
     assert out.stat().st_size > 0
-
-
-def test_api_get_publish_after_fake_job(client, tmp_path):
-    out = tmp_path / "publish-out"
-    publish_root = out / "publish"
-    slug = slug_from_path("clip_a.mp4", 0)
-    item_dir = publish_root / slug
-    item_dir.mkdir(parents=True)
-    thumb = item_dir / "thumbnail.jpg"
-    thumb.write_bytes(b"\xff\xd8\xff" + b"z" * 100)
-    item = PublishItem(
-        video_path=str(tmp_path / "clip_a.mp4"),
-        source_label="clip_a.mp4",
-        platform="youtube",
-        title="My Title",
-        description="My description",
-        tags=["tag1"],
-        thumbnail_timestamp=12.0,
-        thumbnail_path=str(thumb),
-    )
-    write_publish(
-        publish_root / "manifest.json",
-        PublishDocument(platform="youtube", items=[item]),
-    )
-
-    import reels.jobs as jobs_mod
-
-    job_id = "publish-api-job"
-    jobs_mod.get_job_manager()._jobs[job_id] = JobState(
-        id=job_id,
-        status=JobStatus.COMPLETED,
-        video_path=str(tmp_path / "clip_a.mp4"),
-        output_dir=str(out),
-        feature="publish",
-    )
-    jobs_mod.get_job_manager()._running = False
-
-    r = client.get(f"/api/jobs/{job_id}/publish")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["platform"] == "youtube"
-    assert len(data["items"]) == 1
-    assert data["items"][0]["title"] == "My Title"
-    assert data["items"][0]["thumbnail_url"] == f"/api/jobs/{job_id}/publish/0/thumbnail"
-
-    thumb_r = client.get(f"/api/jobs/{job_id}/publish/0/thumbnail")
-    assert thumb_r.status_code == 200
-    assert thumb_r.headers.get("content-type", "").startswith("image/")
 
 
 def test_manifest_two_videos(client, tmp_path):

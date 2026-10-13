@@ -158,14 +158,21 @@ function SystemDockContent() {
   );
 }
 
-export function SystemDockProvider({ children }: { children: ReactNode }) {
+export function SystemDockProvider({
+  children,
+  showDock = true,
+}: {
+  children: ReactNode;
+  /** When false, dock chrome is hidden (bay routes use OpsPanel instead). */
+  showDock?: boolean;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const toggleMobileOpen = useCallback(() => setMobileOpen((o) => !o), []);
 
   return (
     <SystemDockContext.Provider value={{ mobileOpen, toggleMobileOpen, setMobileOpen }}>
       {children}
-      <SystemDockContent />
+      {showDock ? <SystemDockContent /> : null}
     </SystemDockContext.Provider>
   );
 }

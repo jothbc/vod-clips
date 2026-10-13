@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>C — Split bay</title>
+  <link rel="stylesheet" href="../../design-systems/reels-product/tokens/colors_and_type.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--surface-primary);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      font-size: var(--body);
+      display: flex;
+      flex-direction: column;
+    }
+    .note {
+      position: sticky; top: 0; z-index: 200;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 8px 16px;
+      background: #1e2430;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: var(--caption);
+      color: var(--text-muted);
+    }
+    .note strong { color: var(--action-primary); }
+    .note a { color: var(--text-primary); }
+    .tabs { margin-left: auto; display: flex; gap: 6px; }
+    .tabs button {
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .tabs button[aria-pressed="true"] {
+      background: var(--action-primary-soft);
+      border-color: var(--action-primary);
+      color: var(--action-primary);
+    }
+
+    .command {
+      display: flex; align-items: center; gap: 12px;
+      height: 48px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface-elevated);
+    }
+    .logo {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.15rem;
+    }
+    .logo span { color: var(--action-primary); }
+    .cmd-search {
+      flex: 1;
+      max-width: 360px;
+      height: 32px;
+      border-radius: 6px;
+      border: 1px dashed rgba(255,255,255,0.2);
+      display: grid; place-items: center;
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--surface-primary);
+    }
+    .cmd-right {
+      margin-left: auto;
+      display: flex; gap: 8px; align-items: center;
+      font-size: var(--caption);
+      color: var(--text-muted);
+    }
+    .pill {
+      border: 1px solid var(--status-ok);
+      color: var(--status-ok);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+    }
+
+    .bay {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr) 280px;
+      min-height: calc(100vh - 90px);
+    }
+    @media (max-width: 960px) {
+      .bay { grid-template-columns: 1fr; }
+      .rail, .ops { min-height: 200px; }
+    }
+
+    .rail, .ops {
+      background: var(--surface-elevated);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .ops { border-right: none; border-left: 1px solid var(--border-subtle); }
+    .pane-h {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .pane-h small {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+    .filters {
+      display: flex; gap: 6px; padding: 8px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-wrap: wrap;
+    }
+    .chip {
+      font-size: 10px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+    }
+    .chip.on {
+      border-color: var(--action-primary);
+      color: var(--action-primary);
+      background: var(--action-primary-soft);
+    }
+    .list {
+      overflow: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .item {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 8px;
+      padding: 6px;
+      border-radius: 8px;
+      border: 1px dashed rgba(255,255,255,0.14);
+      cursor: default;
+    }
+    .item.on {
+      border-color: var(--action-primary);
+      background: var(--action-primary-soft);
+    }
+    .item .th {
+      height: 40px;
+      border-radius: 4px;
+      border: 1px dashed rgba(255,255,255,0.2);
+      background: var(--surface-card);
+      display: grid; place-items: center;
+      font-size: 9px;
+      color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+    }
+    .item .meta {
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+    }
+    .item .meta span { color: var(--text-muted); font-size: 10px; }
+
+    .canvas {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: #080a0d;
+    }
+    .canvas-stage {
+      flex: 1;
+      margin: 16px;
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--action-primary);
+      display: grid;
+      place-items: center;
+      color: var(--action-primary);
+      font-family: ui-monospace, monospace;
+      position: relative;
+      min-height: 280px;
+    }
+    .canvas-stage.empty {
+      border-style: dashed;
+      border-color: rgba(255,255,255,0.2);
+      color: var(--text-muted);
+    }
+    .canvas-caption {
+      position: absolute;
+      left: 14px; bottom: 14px;
+      font-family: var(--font-body);
+      color: var(--text-primary);
+      text-align: left;
+    }
+    .canvas-caption h1 {
+      margin: 0 0 4px;
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+    }
+    .canvas-caption p { margin: 0; font-size: var(--caption); color: var(--text-muted); }
+
+    .toolstrip {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      padding: 0 16px 16px;
+    }
+    .btn {
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font: inherit;
+      font-size: var(--caption);
+    }
+    .btn.primary {
+      background: var(--action-primary);
+      border-color: var(--action-primary);
+      color: #1a1208;
+      font-weight: 600;
+    }
+
+    .ops-block {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .ops-block h3 {
+      margin: 0 0 8px;
+      font-size: var(--caption);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .job {
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px dashed rgba(255,255,255,0.16);
+      margin-bottom: 6px;
+      font-size: var(--caption);
+    }
+    .job .bar {
+      height: 4px;
+      margin-top: 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+    .job .bar i {
+      display: block;
+      height: 100%;
+      width: 42%;
+      background: var(--action-primary);
+    }
+    .ann {
+      margin: 12px;
+      padding: 10px 12px;
+      border-left: 2px solid var(--action-primary);
+      color: var(--text-muted);
+      font-size: var(--caption);
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <strong>C · Split bay</strong>
+    <span>3-pane workspace · select→act · control room</span>
+    <a href="compare.html">← compare</a>
+    <div class="tabs">
+      <button type="button" data-mode="inspect" aria-pressed="true">Inspect media</button>
+      <button type="button" data-mode="empty" aria-pressed="false">Empty canvas</button>
+    </div>
+  </div>
+
+  <div class="command">
+    <div class="logo">Reels<span>.</span></div>
+    <div class="cmd-search">[ command / search ]</div>
+    <div class="cmd-right">
+      <span class="pill">sys ok</span>
+      <span>carteira</span>
+      <span>galeria</span>
+    </div>
+  </div>
+
+  <div class="bay">
+    <aside class="rail">
+      <div class="pane-h">Media <small>rail</small></div>
+      <div class="filters">
+        <span class="chip on">all</span>
+        <span class="chip">vod</span>
+        <span class="chip">clips</span>
+        <span class="chip">jobs</span>
+      </div>
+      <div class="list">
+        <div class="item on">
+          <div class="th">16:9</div>
+          <div class="meta">Clutch round<span>clip · desktop</span></div>
+        </div>
+        <div class="item">
+          <div class="th">9:16</div>
+          <div class="meta">Ace mobile<span>clip · reels</span></div>
+        </div>
+        <div class="item">
+          <div class="th">vod</div>
+          <div class="meta">Ranked night<span>original · 2h</span></div>
+        </div>
+        <div class="item">
+          <div class="th">vod</div>
+          <div class="meta">Casual<span>original · 48m</span></div>
+        </div>
+        <div class="item">
+          <div class="th">16:9</div>
+          <div class="meta">Fail funny<span>clip · desktop</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="canvas">
+      <div id="stage-full" class="canvas-stage">
+        CANVAS · player / trim surface
+        <div class="canvas-caption">
+          <h1>Clutch round</h1>
+          <p>Selecionado na rail · ações no centro + ops à direita</p>
+        </div>
+      </div>
+      <div id="stage-empty" class="canvas-stage empty hidden">
+        [ empty canvas · drop / pick from rail ]
+      </div>
+      <div class="toolstrip">
+        <button type="button" class="btn primary">Criar clip</button>
+        <button type="button" class="btn">Trim</button>
+        <button type="button" class="btn">Legendas</button>
+        <button type="button" class="btn">Webcam</button>
+        <button type="button" class="btn">Transform reel</button>
+        <button type="button" class="btn">Limpar</button>
+      </div>
+      <p class="ann">Annotation: Home and Watch collapse into one frame. Selecting media loads the canvas; publish/jobs never navigate away. Boldest break from the current multi-page shell.</p>
+    </main>
+
+    <aside class="ops">
+      <div class="pane-h">Ops <small>dock</small></div>
+      <div class="ops-block">
+        <h3>Jobs</h3>
+        <div class="job">create_clip · running<div class="bar"><i></i></div></div>
+        <div class="job">download · queued</div>
+      </div>
+      <div class="ops-block">
+        <h3>Publish</h3>
+        <button type="button" class="btn primary" style="width:100%">Publicar seleção</button>
+        <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted);font-family:ui-monospace,monospace;">[ target form stub ]</p>
+      </div>
+      <div class="ops-block">
+        <h3>Related</h3>
+        <div class="item" style="margin:0">
+          <div class="th">vod</div>
+          <div class="meta">Parent VOD<span>open in canvas</span></div>
+        </div>
+      </div>
+      <div class="ops-block">
+        <h3>System</h3>
+        <p style="margin:0;font-size:var(--caption);color:var(--text-muted);">API · disk · queue health live here (was SystemDock).</p>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const buttons = document.querySelectorAll(".tabs button");
+    const full = document.getElementById("stage-full");
+    const empty = document.getElementById("stage-empty");
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.mode;
+        buttons.forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+        const isEmpty = mode === "empty";
+        full.classList.toggle("hidden", isEmpty);
+        empty.classList.toggle("hidden", !isEmpty);
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import type { JobState } from "../../api/client";
+import type { JobState } from "../../api/jobs";
 
 const PHASES_BY_FEATURE: Record<string, string[]> = {
   v2_analyze: ["probe", "transcribe", "proxy", "heuristic", "done"],

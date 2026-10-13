@@ -9,6 +9,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from reels import video_repo
 from reels.models import ClipMetadata, VideoIndex, VideoKind, VideoMetadata, WebcamRegion
 from reels.probe import probe_video
 from reels.storage import CHUNK_SIZE, MAX_UPLOAD_BYTES, delete_path, project_root, temp_root
@@ -119,37 +120,7 @@ def make_unique_slug(base: str) -> str:
 
 def make_clip_slug(title: str, index: int) -> str:
     base = sanitize_slug_base(title)[:40] or f"clip_{index}"
-    parent_candidate = base
-    # clip slugs are unique per parent; caller passes parent_slug when checking
     return f"{base}_{index:02d}"
-
-
-def load_metadata(slug: str) -> VideoMetadata | None:
-    path = metadata_path(slug)
-    if not path.is_file():
-        return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return VideoMetadata.model_validate(data)
-
-
-def save_metadata(meta: VideoMetadata) -> None:
-    d = original_dir(meta.slug)
-    d.mkdir(parents=True, exist_ok=True)
-    metadata_path(meta.slug).write_text(
-        meta.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
-
-
-def has_transcript(slug: str) -> bool:
-    return segments_path(slug).is_file()
-
-
-def count_clips(slug: str) -> int:
-    root = clips_root(slug)
-    if not root.is_dir():
-        return 0
-    return sum(1 for p in root.iterdir() if p.is_dir() and (p / "meta.json").is_file())
 
 
 def make_clip_id(parent_slug: str, clip_slug: str) -> str:
@@ -163,6 +134,255 @@ def parse_clip_id(video_id: str) -> tuple[str, str] | None:
     if not parent or not clip_slug:
         return None
     return parent, clip_slug
+
+
+def _parse_storage_parts(storage_root: str) -> tuple[str | None, str | None]:
+    """Return (vod_slug, clip_slug) parsed from ``video/{vod}/clips/{clip}`` paths.
+
+    Accepts relative roots and absolute Windows/POSIX paths that contain
+    ``video/...`` somewhere in the hierarchy.
+    """
+    raw = (storage_root or "").replace("\\", "/")
+    parts = [p for p in raw.split("/") if p]
+    try:
+        idx = parts.index(VIDEO_SUBDIR)
+        parts = parts[idx:]
+    except ValueError:
+        return None, None
+    if len(parts) >= 4 and parts[0] == VIDEO_SUBDIR and parts[2] == CLIPS_DIR:
+        return parts[1], parts[3]
+    if len(parts) >= 2 and parts[0] == VIDEO_SUBDIR:
+        return parts[1], None
+    return None, None
+
+
+def _vod_slug_from_record(rec: video_repo.VideoRecord) -> str:
+    vod, _ = _parse_storage_parts(rec.storage_root)
+    return vod or rec.slug
+
+
+def _clip_parts_from_record(rec: video_repo.VideoRecord) -> tuple[str, str]:
+    vod, clip = _parse_storage_parts(rec.storage_root)
+    if vod and clip:
+        return vod, clip
+    parsed = parse_clip_id(rec.slug)
+    if parsed:
+        return parsed
+    return rec.slug, rec.slug
+
+
+def _record_to_vod_meta(rec: video_repo.VideoRecord) -> VideoMetadata:
+    slug = _vod_slug_from_record(rec)
+    return VideoMetadata(
+        slug=slug,
+        title=rec.title or rec.source_filename or slug,
+        kind="original",
+        source_filename=rec.source_filename,
+        duration=rec.duration,
+        width=rec.width,
+        height=rec.height,
+        fps=rec.fps,
+        codec=rec.codec,
+        size_bytes=rec.size_bytes,
+        uploaded_at=rec.uploaded_at or rec.created_at,
+        webcam_region=rec.webcam_region,
+        formats=list(rec.formats_available),
+    )
+
+
+def _record_to_clip_video_meta(rec: video_repo.VideoRecord) -> VideoMetadata:
+    parent_slug, clip_slug = _clip_parts_from_record(rec)
+    clip_id = make_clip_id(parent_slug, clip_slug)
+    parent_rec = video_repo.resolve(parent_slug)
+    uploaded = (parent_rec.uploaded_at or parent_rec.created_at) if parent_rec else rec.uploaded_at
+    return VideoMetadata(
+        slug=clip_id,
+        title=rec.title or clip_slug,
+        kind="clip",
+        parent_slug=parent_slug,
+        clip_slug=clip_slug,
+        start=rec.start_sec or 0.0,
+        end=rec.end_sec or 0.0,
+        duration=rec.duration or max(0.0, (rec.end_sec or 0) - (rec.start_sec or 0)),
+        formats=list(rec.formats_available),
+        source_filename=rec.title,
+        uploaded_at=uploaded or rec.created_at,
+        webcam_region=rec.webcam_region,
+    )
+
+
+def _record_to_clip_meta(rec: video_repo.VideoRecord) -> ClipMetadata:
+    parent_slug, clip_slug = _clip_parts_from_record(rec)
+    feature = rec.source_feature or "highlight"
+    return ClipMetadata(
+        clip_slug=clip_slug,
+        parent_slug=parent_slug,
+        title=rec.title or clip_slug,
+        start=rec.start_sec or 0.0,
+        end=rec.end_sec or 0.0,
+        formats=list(rec.formats_available),
+        source_feature=feature,  # type: ignore[arg-type]
+        webcam_region=rec.webcam_region,
+    )
+
+
+def _record_to_index(rec: video_repo.VideoRecord) -> VideoIndex:
+    if rec.kind == "clip":
+        parent_slug, clip_slug = _clip_parts_from_record(rec)
+        clip_id = make_clip_id(parent_slug, clip_slug)
+        fmt = rec.format or (rec.formats_available[0] if rec.formats_available else "youtube")
+        return VideoIndex(
+            id=clip_id,
+            title=rec.title or clip_slug,
+            kind="clip",
+            duration=rec.duration or max(0.0, (rec.end_sec or 0) - (rec.start_sec or 0)),
+            width=rec.width,
+            height=rec.height,
+            has_transcript=False,
+            clip_count=0,
+            parent_id=parent_slug,
+            format=fmt,
+            start=rec.start_sec,
+            end=rec.end_sec,
+            formats=list(rec.formats_available),
+            uploaded_at=rec.uploaded_at or rec.created_at,
+        )
+    slug = _vod_slug_from_record(rec)
+    return VideoIndex(
+        id=slug,
+        title=rec.title or rec.source_filename or slug,
+        kind="original",
+        duration=rec.duration,
+        width=rec.width,
+        height=rec.height,
+        has_transcript=video_repo.has_transcript(slug),
+        clip_count=video_repo.count_children(rec.id),
+        format=rec.format,
+        uploaded_at=rec.uploaded_at or rec.created_at,
+    )
+
+
+def _import_legacy_vod_json(slug: str) -> VideoMetadata | None:
+    """Import metadata.json into the DB (startup backfill only)."""
+    path = metadata_path(slug)
+    if not path.is_file():
+        return None
+    meta = VideoMetadata.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    _register_vod_in_db(meta)
+    return meta
+
+
+def _import_legacy_clip_json(parent_slug: str, clip_slug: str) -> ClipMetadata | None:
+    path = clip_meta_path(parent_slug, clip_slug)
+    if not path.is_file():
+        return None
+    cm = ClipMetadata.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    _register_clip_in_db(parent_slug, cm)
+    return cm
+
+
+def load_metadata(slug: str) -> VideoMetadata | None:
+    rec = video_repo.resolve(slug)
+    if rec and rec.kind == "original":
+        return _record_to_vod_meta(rec)
+    if not parse_clip_id(slug):
+        return _import_legacy_vod_json(slug)
+    return None
+
+
+def _vod_format(width: int, height: int) -> str | None:
+    if width <= 0 or height <= 0:
+        return None
+    return "desktop" if width >= height else "mobile"
+
+
+def _clip_format(formats: list[str]) -> str | None:
+    if "youtube" in formats:
+        return "desktop"
+    if "reels" in formats:
+        return "mobile"
+    return None
+
+
+def _register_vod_in_db(meta: VideoMetadata) -> None:
+    """Write-through: keep the videos table in sync with a VOD's metadata.json."""
+    try:
+        video_repo.upsert_video(
+            slug=meta.slug,
+            storage_root=f"{VIDEO_SUBDIR}/{meta.slug}",
+            kind="original",
+            title=meta.title or meta.source_filename or meta.slug,
+            fmt=_vod_format(meta.width, meta.height),
+            duration=meta.duration,
+            width=meta.width,
+            height=meta.height,
+            fps=meta.fps,
+            codec=meta.codec,
+            size_bytes=meta.size_bytes,
+            source_filename=meta.source_filename,
+            webcam_region=meta.webcam_region,
+            aliases=[meta.slug],
+            uploaded_at=meta.uploaded_at or None,
+        )
+    except Exception:
+        # DB sync must never block filesystem writes.
+        pass
+
+
+def _register_clip_in_db(parent_slug: str, clip: ClipMetadata) -> None:
+    try:
+        parent = video_repo.resolve(parent_slug)
+        parent_id = parent.id if parent else None
+        clip_id = make_clip_id(parent_slug, clip.clip_slug)
+        video_repo.upsert_video(
+            slug=clip_id,
+            storage_root=f"{VIDEO_SUBDIR}/{parent_slug}/{CLIPS_DIR}/{clip.clip_slug}",
+            kind="clip",
+            title=clip.title or clip.clip_slug,
+            parent_id=parent_id,
+            fmt=_clip_format(list(clip.formats)),
+            formats_available=list(clip.formats),
+            source_feature=clip.source_feature,
+            start_sec=clip.start,
+            end_sec=clip.end,
+            duration=max(0.0, clip.end - clip.start),
+            webcam_region=clip.webcam_region,
+            aliases=[clip_id],
+        )
+    except Exception:
+        pass
+
+
+def save_metadata(meta: VideoMetadata) -> None:
+    original_dir(meta.slug).mkdir(parents=True, exist_ok=True)
+    video_repo.upsert_video(
+        slug=meta.slug,
+        storage_root=f"{VIDEO_SUBDIR}/{meta.slug}",
+        kind="original",
+        title=meta.title or meta.source_filename or meta.slug,
+        fmt=_vod_format(meta.width, meta.height),
+        duration=meta.duration,
+        width=meta.width,
+        height=meta.height,
+        fps=meta.fps,
+        codec=meta.codec,
+        size_bytes=meta.size_bytes,
+        source_filename=meta.source_filename,
+        webcam_region=meta.webcam_region,
+        aliases=[meta.slug],
+        uploaded_at=meta.uploaded_at or _utc_now(),
+    )
+
+
+def has_transcript(slug: str) -> bool:
+    return video_repo.has_transcript(slug)
+
+
+def count_clips(slug: str) -> int:
+    rec = video_repo.resolve(slug)
+    if not rec:
+        return 0
+    return video_repo.count_children(rec.id)
 
 
 def stream_url_for(slug: str, fmt: str | None = None) -> str:
@@ -199,18 +419,11 @@ def to_index(meta: VideoMetadata) -> VideoIndex:
 
 def list_original_videos() -> list[VideoIndex]:
     items: list[VideoIndex] = []
-    root = videos_root()
-    if not root.is_dir():
-        return items
-    for path in root.iterdir():
-        if not path.is_dir():
+    for rec in video_repo.list_videos(kind="original"):
+        slug = _vod_slug_from_record(rec)
+        if not source_path(slug).is_file():
             continue
-        meta = load_metadata(path.name)
-        if meta is None or meta.kind != "original":
-            continue
-        if not source_path(path.name).is_file():
-            continue
-        items.append(to_index(meta))
+        items.append(_record_to_index(rec))
     items.sort(key=lambda x: x.uploaded_at, reverse=True)
     return items
 
@@ -231,95 +444,57 @@ def search_videos(query: str, limit: int = 24) -> list[VideoIndex]:
         return []
     results: list[VideoIndex] = []
     seen: set[str] = set()
-
-    for orig in list_original_videos():
-        if _text_matches(orig.title, q) or _text_matches(orig.id, q):
-            if orig.id not in seen:
-                results.append(orig)
-                seen.add(orig.id)
-
-        clip_root = clips_root(orig.id)
-        if not clip_root.is_dir():
+    for rec in video_repo.search_records(q, limit=limit * 2):
+        if rec.kind == "original":
+            slug = _vod_slug_from_record(rec)
+            if not source_path(slug).is_file():
+                continue
+            idx = _record_to_index(rec)
+        else:
+            parent_slug, clip_slug = _clip_parts_from_record(rec)
+            if not clip_dir(parent_slug, clip_slug).is_dir():
+                continue
+            idx = _record_to_index(rec)
+        if idx.id in seen:
             continue
-        for clip_path in sorted(clip_root.iterdir()):
-            if not clip_path.is_dir():
-                continue
-            cm_path = clip_path / "meta.json"
-            if not cm_path.is_file():
-                continue
-            cm = ClipMetadata.model_validate(json.loads(cm_path.read_text(encoding="utf-8")))
-            clip_id = make_clip_id(orig.id, cm.clip_slug)
-            title = cm.title or cm.clip_slug
-            if not (
-                _text_matches(title, q)
-                or _text_matches(cm.clip_slug, q)
-                or _text_matches(clip_id, q)
-                or _text_matches(orig.id, q)
-            ):
-                continue
-            if clip_id in seen:
-                continue
-            fmt = cm.formats[0] if cm.formats else "youtube"
-            results.append(
-                VideoIndex(
-                    id=clip_id,
-                    title=title,
-                    kind="clip",
-                    duration=max(0.0, cm.end - cm.start),
-                    width=0,
-                    height=0,
-                    has_transcript=False,
-                    clip_count=0,
-                    parent_id=orig.id,
-                    format=fmt,
-                    start=cm.start,
-                    end=cm.end,
-                    formats=list(cm.formats),
-                    uploaded_at=orig.uploaded_at,
-                )
-            )
-            seen.add(clip_id)
-
-    return results[:limit]
+        seen.add(idx.id)
+        results.append(idx)
+        if len(results) >= limit:
+            break
+    return results
 
 
 def list_recent_clips(limit: int = 12) -> list[VideoIndex]:
     clips: list[VideoIndex] = []
-    for orig in list_original_videos():
-        meta = load_metadata(orig.id)
-        if meta is None:
+    for rec in video_repo.list_videos(kind="clip"):
+        parent_slug, clip_slug = _clip_parts_from_record(rec)
+        clip_path = clip_dir(parent_slug, clip_slug)
+        if not clip_path.is_dir():
             continue
-        clip_root = clips_root(orig.id)
-        if not clip_root.is_dir():
-            continue
-        for clip_path in sorted(clip_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if not clip_path.is_dir():
+        parent_rec = video_repo.resolve(parent_slug)
+        uploaded_at = (parent_rec.uploaded_at or parent_rec.created_at) if parent_rec else rec.uploaded_at
+        formats = list(rec.formats_available) or ["youtube"]
+        duration = rec.duration or max(0.0, (rec.end_sec or 0) - (rec.start_sec or 0))
+        clip_id = make_clip_id(parent_slug, clip_slug)
+        for fmt in formats:
+            if not (clip_path / f"{fmt}.mp4").is_file():
                 continue
-            cm_path = clip_path / "meta.json"
-            if not cm_path.is_file():
-                continue
-            cm = ClipMetadata.model_validate(json.loads(cm_path.read_text(encoding="utf-8")))
-            clip_id = make_clip_id(orig.id, cm.clip_slug)
-            duration = max(0.0, cm.end - cm.start)
-            for fmt in cm.formats or ["youtube"]:
-                if not (clip_path / f"{fmt}.mp4").is_file():
-                    continue
-                clips.append(
-                    VideoIndex(
-                        id=clip_id,
-                        title=cm.title or cm.clip_slug,
-                        kind="clip",
-                        duration=duration,
-                        width=0,
-                        height=0,
-                        has_transcript=False,
-                        clip_count=0,
-                        parent_id=orig.id,
-                        format=fmt,
-                        formats=list(cm.formats),
-                        uploaded_at=meta.uploaded_at,
-                    )
+            clips.append(
+                VideoIndex(
+                    id=clip_id,
+                    title=rec.title or clip_slug,
+                    kind="clip",
+                    duration=duration,
+                    width=rec.width,
+                    height=rec.height,
+                    has_transcript=False,
+                    clip_count=0,
+                    parent_id=parent_slug,
+                    format=fmt,
+                    formats=formats,
+                    uploaded_at=uploaded_at or rec.created_at,
                 )
+            )
     clips.sort(key=lambda c: (c.uploaded_at, c.id, c.format or ""), reverse=True)
     return clips[:limit]
 
@@ -327,34 +502,59 @@ def list_recent_clips(limit: int = 12) -> list[VideoIndex]:
 def get_video(slug: str) -> VideoMetadata | None:
     if parse_clip_id(slug):
         return None
-    meta = load_metadata(slug)
-    if meta is None:
-        return None
-    if meta.kind == "clip" and meta.parent_slug:
-        if not clip_dir(meta.parent_slug, meta.clip_slug or slug).exists():
+    rec = video_repo.resolve(slug)
+    if rec and rec.kind == "original":
+        vod_slug = _vod_slug_from_record(rec)
+        if not source_path(vod_slug).is_file():
             return None
-    elif not source_path(slug).is_file():
-        return None
-    return meta
+        return _record_to_vod_meta(rec)
+    legacy = _import_legacy_vod_json(slug)
+    if legacy and source_path(slug).is_file():
+        return legacy
+    return None
+
+
+def _to_storage_id(video_id: str) -> str:
+    """Map a UUID, renamed slug, or legacy alias to the on-disk identifier.
+
+    Falls back to the input unchanged when the id is not registered (e.g. a slug
+    or composite ``parent::clip`` that predates the DB backfill).
+    """
+    try:
+        rec = video_repo.resolve(video_id)
+    except Exception:
+        return video_id
+    if rec is None:
+        return video_id
+    if rec.kind == "clip":
+        vod, clip = _parse_storage_parts(rec.storage_root)
+        if vod and clip:
+            return make_clip_id(vod, clip)
+        return rec.slug or video_id
+    return _vod_slug_from_record(rec)
 
 
 def resolve_video_id(video_id: str) -> VideoMetadata:
-    """Resolve slug or composite clip id parent::clip_slug."""
-    meta = get_video(video_id)
-    if meta is not None:
-        return meta
-    parsed = parse_clip_id(video_id)
+    """Resolve UUID, slug, legacy alias, or composite clip id parent::clip_slug."""
+    storage_id = _to_storage_id(video_id)
+    rec = video_repo.resolve(storage_id)
+    if rec:
+        if rec.kind == "original":
+            vod_slug = _vod_slug_from_record(rec)
+            if not source_path(vod_slug).is_file():
+                raise FileNotFoundError(f"Video not found: {video_id}")
+            return _record_to_vod_meta(rec)
+        return _record_to_clip_video_meta(rec)
+    parsed = parse_clip_id(storage_id)
     if parsed:
         parent, clip_slug = parsed
-        cm_path = clip_meta_path(parent, clip_slug)
-        if not cm_path.is_file():
+        cm = load_clip_metadata(parent, clip_slug)
+        if cm is None:
             raise FileNotFoundError(f"Clip not found: {video_id}")
-        cm = ClipMetadata.model_validate(json.loads(cm_path.read_text(encoding="utf-8")))
-        parent_meta = load_metadata(parent)
-        if parent_meta is None:
-            raise FileNotFoundError(f"Parent not found: {parent}")
+        parent_rec = video_repo.resolve(parent)
+        uploaded = (parent_rec.uploaded_at or parent_rec.created_at) if parent_rec else ""
         return VideoMetadata(
-            slug=video_id,
+            slug=storage_id,
             title=cm.title or clip_slug,
             kind="clip",
             parent_slug=parent,
@@ -364,7 +564,8 @@ def resolve_video_id(video_id: str) -> VideoMetadata:
             duration=max(0.0, cm.end - cm.start),
             formats=cm.formats,
             source_filename=cm.title,
-            uploaded_at=parent_meta.uploaded_at,
+            uploaded_at=uploaded,
+            webcam_region=cm.webcam_region,
         )
     raise FileNotFoundError(f"Video not found: {video_id}")
 
@@ -372,40 +573,12 @@ def resolve_video_id(video_id: str) -> VideoMetadata:
 def related_videos(video_id: str) -> list[VideoIndex]:
     meta = resolve_video_id(video_id)
     if meta.kind == "original":
-        clip_root = clips_root(meta.slug)
-        clip_entries: list[tuple[ClipMetadata, VideoIndex]] = []
-        if clip_root.is_dir():
-            for clip_path in clip_root.iterdir():
-                if not clip_path.is_dir():
-                    continue
-                cm_path = clip_path / "meta.json"
-                if not cm_path.is_file():
-                    continue
-                cm = ClipMetadata.model_validate(json.loads(cm_path.read_text(encoding="utf-8")))
-                clip_id = make_clip_id(meta.slug, cm.clip_slug)
-                fmt = cm.formats[0] if cm.formats else "youtube"
-                clip_entries.append(
-                    (
-                        cm,
-                        VideoIndex(
-                            id=clip_id,
-                            title=cm.title or cm.clip_slug,
-                            kind="clip",
-                            duration=max(0.0, cm.end - cm.start),
-                            width=0,
-                            height=0,
-                            has_transcript=False,
-                            clip_count=0,
-                            parent_id=meta.slug,
-                            format=fmt,
-                            start=cm.start,
-                            end=cm.end,
-                            formats=list(cm.formats),
-                        ),
-                    )
-                )
-        clip_entries.sort(key=lambda pair: pair[0].start)
-        return [idx for _, idx in clip_entries]
+        rec = video_repo.resolve(meta.slug)
+        if not rec:
+            return []
+        children = video_repo.children(rec.id)
+        children.sort(key=lambda c: c.start_sec or 0)
+        return [_record_to_index(child) for child in children]
     if meta.parent_slug:
         parent = get_video(meta.parent_slug)
         if parent:
@@ -416,28 +589,24 @@ def related_videos(video_id: str) -> list[VideoIndex]:
 def gallery_tree() -> list[dict]:
     tree: list[dict] = []
     for orig in list_original_videos():
+        rec = video_repo.resolve(orig.id)
         clips: list[dict] = []
-        clip_root = clips_root(orig.id)
-        if clip_root.is_dir():
-            for clip_path in sorted(clip_root.iterdir()):
-                if not clip_path.is_dir():
-                    continue
-                cm_path = clip_path / "meta.json"
-                if not cm_path.is_file():
-                    continue
-                cm = ClipMetadata.model_validate(json.loads(cm_path.read_text(encoding="utf-8")))
-                clip_id = make_clip_id(orig.id, cm.clip_slug)
+        if rec:
+            for child in video_repo.children(rec.id):
+                parent_slug, clip_slug = _clip_parts_from_record(child)
+                clip_id = make_clip_id(parent_slug, clip_slug)
+                formats = list(child.formats_available)
                 urls: dict[str, str] = {}
-                for fmt in cm.formats:
-                    p = clip_path / f"{fmt}.mp4"
-                    if p.is_file():
+                base = clip_dir(parent_slug, clip_slug)
+                for fmt in formats:
+                    if (base / f"{fmt}.mp4").is_file():
                         urls[fmt] = stream_url_for(clip_id, fmt)
                 clips.append(
                     {
                         "id": clip_id,
-                        "clip_slug": cm.clip_slug,
-                        "title": cm.title or cm.clip_slug,
-                        "formats": cm.formats,
+                        "clip_slug": clip_slug,
+                        "title": child.title or clip_slug,
+                        "formats": formats,
                         "stream_urls": urls,
                     }
                 )
@@ -524,16 +693,32 @@ async def stream_upload_to_video(file_obj, filename: str) -> tuple[VideoMetadata
 def save_clip_metadata(parent_slug: str, clip: ClipMetadata) -> Path:
     d = clip_dir(parent_slug, clip.clip_slug)
     d.mkdir(parents=True, exist_ok=True)
-    path = d / "meta.json"
-    path.write_text(clip.model_dump_json(indent=2), encoding="utf-8")
+    parent = video_repo.resolve(parent_slug)
+    clip_id = make_clip_id(parent_slug, clip.clip_slug)
+    video_repo.upsert_video(
+        slug=clip_id,
+        storage_root=f"{VIDEO_SUBDIR}/{parent_slug}/{CLIPS_DIR}/{clip.clip_slug}",
+        kind="clip",
+        title=clip.title or clip.clip_slug,
+        parent_id=parent.id if parent else None,
+        fmt=_clip_format(list(clip.formats)),
+        formats_available=list(clip.formats),
+        source_feature=clip.source_feature,
+        start_sec=clip.start,
+        end_sec=clip.end,
+        duration=max(0.0, clip.end - clip.start),
+        webcam_region=clip.webcam_region,
+        aliases=[clip_id],
+    )
     return d
 
 
 def load_clip_metadata(parent_slug: str, clip_slug: str) -> ClipMetadata | None:
-    path = clip_meta_path(parent_slug, clip_slug)
-    if not path.is_file():
-        return None
-    return ClipMetadata.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    clip_id = make_clip_id(parent_slug, clip_slug)
+    rec = video_repo.resolve(clip_id)
+    if rec and rec.kind == "clip":
+        return _record_to_clip_meta(rec)
+    return _import_legacy_clip_json(parent_slug, clip_slug)
 
 
 def _even_dim(n: int) -> int:
@@ -812,10 +997,9 @@ def replace_clip_source(
     """Overwrite a clip format file and refresh clip metadata."""
     if not src.is_file():
         raise FileNotFoundError(str(src))
-    meta_path = clip_meta_path(parent_slug, clip_slug)
-    if not meta_path.is_file():
+    clip = load_clip_metadata(parent_slug, clip_slug)
+    if clip is None:
         raise ValueError(f"Clip not found: {parent_slug}/{clip_slug}")
-    clip = ClipMetadata.model_validate(json.loads(meta_path.read_text(encoding="utf-8")))
     dest = clip_dir(parent_slug, clip_slug) / f"{fmt}.mp4"
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
@@ -828,11 +1012,266 @@ def replace_clip_source(
 
 
 def delete_video(slug: str) -> int:
-    return delete_path(video_dir(slug))
+    """Remove a VOD's files, then its database row.
+
+    The row is removed only after the folder is gone, including when the folder
+    was already deleted by hand. Raises OSError if any file is still on disk.
+    """
+    rec = video_repo.resolve(slug)
+    storage_slug = _vod_slug_from_record(rec) if rec and rec.kind == "original" else slug
+    target = video_dir(storage_slug)
+    freed = _delete_tree(target)
+    if rec is not None:
+        freed += _purge_record_tree(rec, keep_under=target)
+    return freed
 
 
 def delete_clip(parent_slug: str, clip_slug: str) -> int:
-    return delete_path(clip_dir(parent_slug, clip_slug))
+    """Remove a clip's files, then its database row.
+
+    A clip whose folder is already gone still drops the database row.
+    Raises OSError if the clip folder is still on disk.
+    """
+    clip_id = make_clip_id(parent_slug, clip_slug)
+    rec = video_repo.resolve(clip_id)
+    target = clip_dir(parent_slug, clip_slug)
+    freed = _delete_tree(target)
+    if rec is not None:
+        freed += _purge_external_job_outputs(rec.id, keep_under=target)
+        video_repo.delete_video(rec.id)
+    return freed
+
+
+def _delete_tree(target: Path) -> int:
+    if not target.exists():
+        return 0
+    freed = delete_path(target)
+    if target.exists():
+        raise OSError(f"Files still present: {target}")
+    return freed
+
+
+def _purge_record_tree(rec: video_repo.VideoRecord, *, keep_under: Path) -> int:
+    """Delete external job outputs for a video and its clips, then the DB rows."""
+    freed = 0
+    ids = [rec.id]
+    if rec.kind == "original":
+        ids.extend(child.id for child in video_repo.children(rec.id))
+    for video_id in ids:
+        freed += _purge_external_job_outputs(video_id, keep_under=keep_under)
+    video_repo.delete_video(rec.id)
+    return freed
+
+
+def _purge_external_job_outputs(video_id: str, *, keep_under: Path | None = None) -> int:
+    """Delete job folders that live outside the video tree, then the job rows.
+
+    Outputs inside ``keep_under`` are skipped: that tree is removed separately.
+    Paths outside the project temp directory are left alone.
+    """
+    from reels import job_store
+
+    freed = 0
+    root = temp_root().resolve()
+    keep = keep_under.resolve() if keep_under is not None else None
+    for raw in job_store.output_dirs_for_video(video_id):
+        try:
+            resolved = Path(raw).resolve()
+        except OSError:
+            continue
+        try:
+            if not resolved.is_relative_to(root):
+                continue
+            if keep is not None and (resolved == keep or resolved.is_relative_to(keep)):
+                continue
+        except ValueError:
+            continue
+        if resolved.exists():
+            freed += delete_path(resolved)
+    job_store.delete_jobs_for_video(video_id)
+    return freed
+
+
+def prune_missing_videos() -> int:
+    """Drop database rows whose storage folder is already gone.
+
+    Manual deletes and a failed file removal used to leave rows behind. Rows
+    whose folder still exists are kept, even if ``source.mp4`` is missing
+    (a download may still be writing it).
+    """
+    removed = 0
+    for rec in list(video_repo.list_videos()):
+        if rec.kind == "clip":
+            parent_slug, clip_slug = _clip_parts_from_record(rec)
+            try:
+                folder = clip_dir(parent_slug, clip_slug)
+            except ValueError:
+                folder = None
+            if folder is not None and folder.is_dir():
+                continue
+            if video_repo.resolve(rec.id) is None:
+                continue
+            if folder is not None:
+                _purge_external_job_outputs(rec.id, keep_under=folder)
+            video_repo.delete_video(rec.id)
+            removed += 1
+            continue
+
+        slug = _vod_slug_from_record(rec)
+        try:
+            folder = video_dir(slug)
+        except ValueError:
+            folder = None
+        if folder is not None and folder.is_dir():
+            continue
+        if video_repo.resolve(rec.id) is None:
+            continue
+        _purge_record_tree(rec, keep_under=folder or videos_root())
+        removed += 1
+    return removed
+
+
+def _sync_transcript_from_files(slug: str) -> None:
+    """Backfill a VOD's transcript into the DB from its segments.json, if present."""
+    seg_path = segments_path(slug)
+    if not seg_path.is_file():
+        return
+    try:
+        segments = json.loads(seg_path.read_text(encoding="utf-8"))
+        original: list = []
+        orig_path = segments_original_path(slug)
+        if orig_path.is_file():
+            original = json.loads(orig_path.read_text(encoding="utf-8"))
+        video_repo.save_transcript(slug, segments, original)
+    except Exception:
+        pass
+
+
+def _recover_orphan_clips(parent_slug: str) -> tuple[int, int, int]:
+    """Register or remove clip dirs that lack meta.json / DB rows.
+
+    Returns (clips_touched, orphans_recovered, orphans_removed).
+    """
+    known_formats = ("youtube", "reels")
+    clips = 0
+    recovered = 0
+    removed = 0
+    clip_root = clips_root(parent_slug)
+    if not clip_root.is_dir():
+        return 0, 0, 0
+    for clip_path in clip_root.iterdir():
+        if not clip_path.is_dir():
+            continue
+        cm_path = clip_path / "meta.json"
+        if cm_path.is_file():
+            try:
+                cm = ClipMetadata.model_validate(json.loads(cm_path.read_text(encoding="utf-8")))
+            except Exception:
+                continue
+            _register_clip_in_db(parent_slug, cm)
+            clips += 1
+            continue
+
+        formats = [fmt for fmt in known_formats if (clip_path / f"{fmt}.mp4").is_file()]
+        if not formats:
+            delete_path(clip_path)
+            removed += 1
+            continue
+
+        clip_id = make_clip_id(parent_slug, clip_path.name)
+        if video_repo.resolve(clip_id):
+            clips += 1
+            continue
+
+        primary = "youtube" if "youtube" in formats else formats[0]
+        try:
+            info = probe_video(clip_path / f"{primary}.mp4")
+            title = re.sub(r"_+", " ", clip_path.name).strip() or clip_path.name
+            cm = ClipMetadata(
+                clip_slug=clip_path.name,
+                parent_slug=parent_slug,
+                title=title,
+                start=0.0,
+                end=float(info.duration or 0.0),
+                formats=list(formats),
+                source_feature="manual_clip",
+            )
+            save_clip_metadata(parent_slug, cm)
+            clips += 1
+            recovered += 1
+        except Exception:
+            delete_path(clip_path)
+            removed += 1
+    return clips, recovered, removed
+
+
+def sync_from_filesystem() -> dict[str, int]:
+    """Backfill the videos table from existing temp/video/{slug}/ folders.
+
+    Idempotent: upserts one row per VOD and per clip. Reads legacy JSON only here.
+    Clip folders with mp4 files but no meta.json / DB row are recovered (or removed if empty).
+    """
+    vods = 0
+    clips = 0
+    orphans_recovered = 0
+    orphans_removed = 0
+    orphans_pruned = prune_missing_videos()
+    synced_slugs: set[str] = set()
+    root = videos_root()
+    if not root.is_dir():
+        return {
+            "vods": 0,
+            "clips": 0,
+            "orphans_recovered": 0,
+            "orphans_removed": 0,
+            "orphans_pruned": prune_missing_videos(),
+        }
+
+    # Pass 1: legacy metadata.json VODs.
+    for path in root.iterdir():
+        if not path.is_dir():
+            continue
+        meta_path = metadata_path(path.name)
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = VideoMetadata.model_validate(json.loads(meta_path.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+        if meta.kind != "original":
+            continue
+        if not source_path(path.name).is_file():
+            continue
+        _register_vod_in_db(meta)
+        _sync_transcript_from_files(path.name)
+        vods += 1
+        synced_slugs.add(path.name)
+        c, rec, rem = _recover_orphan_clips(path.name)
+        clips += c
+        orphans_recovered += rec
+        orphans_removed += rem
+
+    # Pass 2: DB-registered VODs (and source.mp4 folders) that lack metadata.json.
+    for rec in video_repo.list_videos(kind="original"):
+        slug = _vod_slug_from_record(rec)
+        if slug in synced_slugs:
+            continue
+        if not source_path(slug).is_file():
+            continue
+        synced_slugs.add(slug)
+        vods += 1
+        c, rec_n, rem = _recover_orphan_clips(slug)
+        clips += c
+        orphans_recovered += rec_n
+        orphans_removed += rem
+
+    return {
+        "vods": vods,
+        "clips": clips,
+        "orphans_recovered": orphans_recovered,
+        "orphans_removed": orphans_removed,
+        "orphans_pruned": orphans_pruned,
+    }
 
 
 def twitch_slug(video_id: str) -> str:

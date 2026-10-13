@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createPublishSession,
   deployPublish,
   fetchPublishTargets,
   publishSessionThumbnailUrl,
   savePublishDraft,
-  suggestPublishField,
   uploadSessionThumbnail,
   waitPublishDeploy,
   type PublishDeployStatus,
-  type PublishSuggestField,
   type VideoDetail,
 } from "../../api/v2";
 import type { ClipFormat } from "./FormatToggle";
@@ -28,31 +26,6 @@ interface Props {
   onClose: () => void;
 }
 
-function AiButton({
-  loading,
-  disabled,
-  onClick,
-}: {
-  loading: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`v2-publish-ai-btn${loading ? " v2-publish-ai-btn--loading" : ""}`}
-      disabled={disabled || loading}
-      onClick={onClick}
-      aria-busy={loading}
-    >
-      <span className="v2-publish-ai-btn__spark" aria-hidden>
-        ✦
-      </span>
-      {loading ? "Gerando…" : "Gerar com IA"}
-    </button>
-  );
-}
-
 export default function PublishModal({ video, sourceFormat, onClose }: Props) {
   const [step, setStep] = useState<Step>("compose");
   const [platform, setPlatform] = useState<Platform>("youtube");
@@ -67,7 +40,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
   const [hasThumbnail, setHasThumbnail] = useState(false);
   const [thumbVersion, setThumbVersion] = useState(0);
   const [thumbUploading, setThumbUploading] = useState(false);
-  const [generating, setGenerating] = useState<PublishSuggestField | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [targetId, setTargetId] = useState("");
@@ -114,38 +86,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
       cancelled = true;
     };
   }, [targetId]);
-
-  const suggestContext = useCallback(
-    () => ({
-      platform,
-      content_type: contentType,
-      game_name: contentType === "game" ? gameName.trim() : "",
-      video_context: videoContext.trim(),
-      channel_info: channelInfo.trim(),
-      title: title.trim(),
-    }),
-    [platform, contentType, gameName, videoContext, channelInfo, title]
-  );
-
-  async function runSuggest(field: PublishSuggestField) {
-    if (!sessionId || !video.has_transcript) return;
-    setGenerating(field);
-    setError(null);
-    try {
-      const res = await suggestPublishField(sessionId, { field, ...suggestContext() });
-      if (field === "title" && res.title) setTitle(res.title);
-      if (field === "description" && res.description) setDescription(res.description);
-      if (field === "tags" && res.tags) setTagsText(res.tags.join(", "));
-      if (field === "thumbnail") {
-        setHasThumbnail(true);
-        setThumbVersion((v) => v + 1);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao gerar sugestão");
-    } finally {
-      setGenerating(null);
-    }
-  }
 
   async function handleThumbnailFile(file: File) {
     if (!sessionId) return;
@@ -206,7 +146,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
     sessionId && hasThumbnail
       ? `${publishSessionThumbnailUrl(sessionId)}?v=${thumbVersion}`
       : "";
-  const canSuggest = Boolean(sessionId && video.has_transcript && !sessionLoading);
 
   return (
     <div className="v2-modal-backdrop" onClick={onClose}>
@@ -214,7 +153,7 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
         <div className="v2-modal-header">
           <div>
             <h2>Publicar</h2>
-            <p className="v2-publish-sub">Monte título, descrição, tags e capa — IA só quando você pedir</p>
+            <p className="v2-publish-sub">Monte título, descrição, tags e capa</p>
           </div>
           <button type="button" className="v2-btn v2-btn--ghost" onClick={onClose}>
             Fechar
@@ -307,10 +246,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
                 <textarea rows={2} value={channelInfo} onChange={(e) => setChannelInfo(e.target.value)} />
               </label>
 
-              {!video.has_transcript && (
-                <p className="v2-error">Obtenha a transcrição antes de usar sugestões de IA.</p>
-              )}
-
               <div className="v2-publish-ticket__grid">
                 <div className="v2-publish-thumb-frame">
                   <PublishThumbnailDropzone
@@ -318,11 +253,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
                     thumbSrc={thumbSrc}
                     uploading={thumbUploading}
                     onPick={handleThumbnailFile}
-                  />
-                  <AiButton
-                    loading={generating === "thumbnail"}
-                    disabled={!canSuggest}
-                    onClick={() => void runSuggest("thumbnail")}
                   />
                 </div>
 
@@ -336,11 +266,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
                         placeholder="Título do vídeo"
                       />
                     </label>
-                    <AiButton
-                      loading={generating === "title"}
-                      disabled={!canSuggest}
-                      onClick={() => void runSuggest("title")}
-                    />
                   </div>
 
                   <div className="v2-publish-field-row v2-publish-field-row--stack">
@@ -353,11 +278,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
                         placeholder="Descrição para a plataforma"
                       />
                     </label>
-                    <AiButton
-                      loading={generating === "description"}
-                      disabled={!canSuggest}
-                      onClick={() => void runSuggest("description")}
-                    />
                   </div>
 
                   <div className="v2-publish-field-row">
@@ -369,11 +289,6 @@ export default function PublishModal({ video, sourceFormat, onClose }: Props) {
                         placeholder="tag1, tag2, tag3"
                       />
                     </label>
-                    <AiButton
-                      loading={generating === "tags"}
-                      disabled={!canSuggest}
-                      onClick={() => void runSuggest("tags")}
-                    />
                   </div>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useJobController } from "../../hooks/useJobController";
-import type { JobState } from "../../api/client";
+import type { JobState } from "../../api/jobs";
 
 /** Thin wrapper around legacy job controller for v2 async flows. */
 export function useV2Job(opts?: {

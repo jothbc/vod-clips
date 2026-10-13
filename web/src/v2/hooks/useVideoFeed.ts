@@ -37,7 +37,11 @@ export function useVideoFeed(pageSize = 24) {
     if (!loading && items.length < total) load(false);
   }, [load, loading, items.length, total]);
 
+  const refresh = useCallback(() => {
+    void load(true);
+  }, [load]);
+
   const hasMore = items.length < total;
 
-  return { items, loading, error, hasMore, loadMore, refresh: () => load(true) };
+  return { items, loading, error, hasMore, loadMore, refresh };
 }

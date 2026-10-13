@@ -73,6 +73,7 @@ def test_clip_detail_includes_stream_urls(client):
     assert set(data["formats"]) == {"youtube", "reels"}
     assert "youtube" in data["stream_urls"]
     assert "reels" in data["stream_urls"]
+    assert data["size_bytes"] == 10
 
 
 def test_list_clips_expands_formats(client):
@@ -207,3 +208,32 @@ def test_delete_vod_removes_entire_tree(client):
     assert r.status_code == 200
     assert r.json()["deleted"] is True
     assert not vs.video_dir("vod_del_all").exists()
+
+
+def test_delete_vod_missing_files_clears_db(client):
+    import shutil
+
+    from reels import video_repo
+
+    _seed_vod("vod_ghost")
+    shutil.rmtree(vs.video_dir("vod_ghost"))
+    r = client.delete("/api/v2/videos/vod_ghost")
+    assert r.status_code == 200
+    assert r.json()["deleted"] is True
+    assert r.json()["bytes_freed"] == 0
+    assert video_repo.resolve("vod_ghost") is None
+
+
+def test_delete_vod_locked_files_keeps_the_row(client, monkeypatch):
+    from reels import video_repo
+
+    _seed_vod("vod_locked")
+
+    def _locked(_slug: str) -> int:
+        raise OSError("file in use")
+
+    monkeypatch.setattr("reels.api.videos.delete_video", _locked)
+    r = client.delete("/api/v2/videos/vod_locked")
+    assert r.status_code == 409
+    assert vs.video_dir("vod_locked").is_dir()
+    assert video_repo.resolve("vod_locked") is not None

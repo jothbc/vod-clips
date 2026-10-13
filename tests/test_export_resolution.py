@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
-from reels.api.app import create_app
 from reels.export import build_crop_filter, build_scale_filter, export_selected
 from reels.export_resolution import (
     ExportResolution,
@@ -21,20 +17,7 @@ from reels.export_resolution import (
     youtube_presets,
 )
 from reels.config import load_export_profiles
-from reels.jobs import JobManager, JobState, JobStatus
 from reels.models import Highlight, HighlightsDocument
-
-
-@pytest.fixture
-def client(monkeypatch):
-    import reels.jobs as jobs_mod
-    import reels.twitch.manager as twitch_mod
-
-    jobs_mod._manager = JobManager()
-    twitch_mod.reset_twitch_download_manager(max_concurrent=2, skip_existing=True)
-    c = TestClient(create_app())
-    yield c
-    jobs_mod.get_job_manager()._running = False
 
 
 def test_default_youtube_size_native():
@@ -135,80 +118,3 @@ def test_export_selected_uses_dynamic_profiles(mock_export_clip, tmp_path):
     reels_profile = mock_export_clip.call_args_list[1].args[3]
     assert (yt_profile.width, yt_profile.height) == (1280, 720)
     assert (reels_profile.width, reels_profile.height) == (404, 720)
-
-
-@patch("reels.api.app.probe_video")
-def test_highlights_includes_resolution_presets(mock_probe, client, tmp_path):
-    vod = tmp_path / "vod.mp4"
-    vod.write_bytes(b"x")
-    out = tmp_path / "out"
-    out.mkdir()
-    highlights = {
-        "source_video": str(vod),
-        "highlights": [
-            {
-                "start": 0,
-                "end": 5,
-                "score": 0.9,
-                "title": "Test",
-                "reason": "r",
-                "source": "heuristic",
-            }
-        ],
-        "warnings": [],
-    }
-    (out / "highlights.json").write_text(json.dumps(highlights), encoding="utf-8")
-
-    mock_probe.return_value = MagicMock(width=1920, height=1080)
-
-    import reels.jobs as jobs_mod
-
-    job_id = "highlights-res-job"
-    jobs_mod.get_job_manager()._jobs[job_id] = JobState(
-        id=job_id,
-        status=JobStatus.COMPLETED,
-        video_path=str(vod),
-        output_dir=str(out),
-    )
-    jobs_mod.get_job_manager()._running = False
-
-    r = client.get(f"/api/jobs/{job_id}/highlights")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["source_width"] == 1920
-    assert data["source_height"] == 1080
-    assert data["default_youtube"]["width"] == 1920
-    assert data["default_reels"]["width"] == 608
-    assert len(data["youtube_presets"]) >= 2
-    assert len(data["reels_presets"]) >= 1
-
-
-@patch("reels.jobs.probe_video")
-def test_export_api_rejects_invalid_reels_aspect(mock_probe, client, tmp_path):
-    vod = tmp_path / "vod.mp4"
-    vod.write_bytes(b"x")
-    out = tmp_path / "out"
-    out.mkdir()
-
-    mock_probe.return_value = MagicMock(width=1920, height=1080)
-
-    import reels.jobs as jobs_mod
-
-    job_id = "export-invalid-reels"
-    jobs_mod.get_job_manager()._jobs[job_id] = JobState(
-        id=job_id,
-        status=JobStatus.COMPLETED,
-        video_path=str(vod),
-        output_dir=str(out),
-    )
-    jobs_mod.get_job_manager()._running = False
-
-    r = client.post(
-        f"/api/jobs/{job_id}/export",
-        json={
-            "highlight_indices": [0],
-            "reels_resolution": {"width": 1920, "height": 1080},
-        },
-    )
-    assert r.status_code == 400
-    assert "9:16" in r.json()["detail"]

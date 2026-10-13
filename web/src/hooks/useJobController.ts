@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  cancelJob,
-  createJob,
-  getJob,
-  subscribeJobEvents,
-  type CreateJobBody,
+  cancelV2Job,
+  getV2Job,
+  subscribeV2JobEvents,
   type JobState,
-} from "../api/client";
+} from "../api/jobs";
 
 interface Options {
   onCompleted?: (job: JobState) => void;
@@ -56,40 +54,17 @@ export function useJobController(opts: Options = {}) {
     (jobId: string) => {
       closeSse();
       jobIdRef.current = jobId;
-      void getJob(jobId).then(onUpdate(jobId)).catch(() => {});
-      sseUnsubRef.current = subscribeJobEvents(jobId, onUpdate(jobId));
+      void getV2Job(jobId).then(onUpdate(jobId)).catch(() => {});
+      sseUnsubRef.current = subscribeV2JobEvents(jobId, onUpdate(jobId));
     },
     [closeSse, onUpdate]
-  );
-
-  const start = useCallback(
-    async (body: CreateJobBody): Promise<string | null> => {
-      closeSse();
-      setStarting(true);
-      setJob(null);
-      setError(null);
-      const previousJobId = jobIdRef.current;
-      try {
-        const { job_id } = await createJob({ ...body, previous_job_id: previousJobId });
-        jobIdRef.current = job_id;
-        const initial = await getJob(job_id);
-        setJob(initial);
-        subscribe(job_id);
-        return job_id;
-      } catch (e) {
-        setStarting(false);
-        setError(e instanceof Error ? e.message : String(e));
-        return null;
-      }
-    },
-    [closeSse, subscribe]
   );
 
   const cancel = useCallback(async () => {
     const id = jobIdRef.current;
     if (!id) return;
     try {
-      await cancelJob(id);
+      await cancelV2Job(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -111,7 +86,6 @@ export function useJobController(opts: Options = {}) {
     jobIdRef,
     setError,
     setStarting,
-    start,
     subscribe,
     cancel,
     reset,

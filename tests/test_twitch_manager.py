@@ -34,10 +34,28 @@ def test_skip_existing_completes_without_download(manager):
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(b"\x00" * 5000)
 
-    state = manager.start(TwitchDownloadRequest(url="https://www.twitch.tv/videos/2222222222"))
+    with patch("reels.video_store.probe_video") as probe:
+        from reels.models import VideoInfo
+
+        probe.return_value = VideoInfo(
+            path=str(dest),
+            duration=10.0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            codec="h264",
+            size_bytes=5000,
+        )
+        state = manager.start(TwitchDownloadRequest(url="https://www.twitch.tv/videos/2222222222"))
     assert state.status == "completed"
     assert state.path == str(dest.resolve())
     assert state.percent == 100.0
+
+    from reels import video_repo
+
+    rec = video_repo.resolve("twitch_2222222222")
+    assert rec is not None
+    assert rec.title == "Twitch VOD 2222222222"
 
 
 def test_parallel_queue_max_two_running(manager):

@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 
 import httpx
 
+from reels.http_util import http_client
+
 TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize"
 TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 TIKTOK_UPLOAD_INIT = "https://open.tiktokapis.com/v2/post/publish/video/init/"
@@ -63,7 +65,7 @@ def exchange_code(
     client_key, client_secret, redirect_uri = _client_config(
         client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri
     )
-    with httpx.Client(timeout=60.0) as client:
+    with http_client(timeout=60.0) as client:
         r = client.post(
             TIKTOK_TOKEN_URL,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -95,7 +97,7 @@ def publish_video(
     if not path.is_file():
         raise FileNotFoundError(video_path)
     size = path.stat().st_size
-    with httpx.Client(timeout=600.0) as client:
+    with http_client(timeout=600.0) as client:
         init = client.post(
             TIKTOK_UPLOAD_INIT,
             headers={

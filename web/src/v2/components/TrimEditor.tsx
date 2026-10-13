@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import { fetchSystemStatus, postTrim, postTrimFinalize, trimPreviewUrl, type TrimJobBody, type VideoDetail } from "../../api/v2";
-import type { JobState } from "../../api/client";
+import type { JobState } from "../../api/jobs";
 import { formatMmSs, formatRange } from "../../utils/timeFormat";
 import type { ClipFormat } from "./FormatToggle";
 import JobProgressBar from "./JobProgressBar";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useV2Job } from "../hooks/useV2Job";
 import {
+  clampSegmentsToDuration,
   deleteSegment,
   duplicateSegment,
   gapsBetweenSegments,
   initialSegments,
+  isSimpleChronologicalKeep,
   overlapCountAt,
   reorderSegments,
+  resolveTrimDuration,
   splitAt,
   toKeepSpans,
   totalKeptDuration,
@@ -51,13 +55,16 @@ export default function TrimEditor({
   const [saveMode, setSaveMode] = useState<"new_vod" | "replace" | "new_clip" | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const [useNvenc, setUseNvenc] = useState(true);
   const [nvencAvailable, setNvencAvailable] = useState(false);
+  const [forceReencode, setForceReencode] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [mediaDuration, setMediaDuration] = useState(0);
   const railRef = useRef<HTMLDivElement>(null);
 
-  const safeDuration = Math.max(0.01, duration);
+  const safeDuration = resolveTrimDuration(duration, mediaDuration);
 
   useEffect(() => {
     fetchSystemStatus()
@@ -70,10 +77,44 @@ export default function TrimEditor({
   }, []);
 
   useEffect(() => {
-    setSegments(initialSegments(duration));
+    setMediaDuration(0);
+    setSegments(initialSegments(Math.max(0.01, duration)));
     setSelectedId(null);
     setUndoStack([]);
   }, [video.id, duration]);
+
+  useEffect(() => {
+    const el = playerRef.current;
+    if (!el) return;
+    const syncMediaDuration = () => {
+      if (Number.isFinite(el.duration) && el.duration > 0) {
+        setMediaDuration(el.duration);
+      }
+    };
+    syncMediaDuration();
+    el.addEventListener("loadedmetadata", syncMediaDuration);
+    el.addEventListener("durationchange", syncMediaDuration);
+    return () => {
+      el.removeEventListener("loadedmetadata", syncMediaDuration);
+      el.removeEventListener("durationchange", syncMediaDuration);
+    };
+  }, [playerRef, video.id]);
+
+  // If effective duration shrinks (API vs media/ffprobe mismatch), keep playlist in bounds.
+  useEffect(() => {
+    setSegments((prev) => {
+      const next = clampSegmentsToDuration(prev, safeDuration);
+      if (
+        next.length === prev.length &&
+        next.every(
+          (s, i) => s.start === prev[i].start && s.end === prev[i].end && s.id === prev[i].id
+        )
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [safeDuration]);
 
   useEffect(() => {
     const el = playerRef.current;
@@ -192,9 +233,12 @@ export default function TrimEditor({
     if (!trimJobId || finalizing) return;
     if (mode === "replace") {
       const label = video.kind === "clip" ? "clip atual" : "VOD atual";
-      const ok = window.confirm(
-        `Substituir o ${label}? O arquivo original será sobrescrito e não pode ser desfeito.`
-      );
+      const ok = await confirm({
+        title: `Substituir ${label}?`,
+        message: `O arquivo original será sobrescrito e não pode ser desfeito.`,
+        confirmLabel: "Substituir",
+        danger: true,
+      });
       if (!ok) return;
     }
     setError(null);
@@ -217,9 +261,14 @@ export default function TrimEditor({
 
   async function handleRender() {
     setError(null);
+    const clamped = clampSegmentsToDuration(segments, safeDuration);
+    if (clamped !== segments) {
+      setSegments(clamped);
+    }
     setStep("processing");
     const body: TrimJobBody = {
-      keep_spans: toKeepSpans(segments),
+      keep_spans: toKeepSpans(clamped),
+      force_reencode: forceReencode,
       ...(nvencAvailable ? { use_nvenc: useNvenc } : { use_nvenc: false }),
       ...(video.kind === "clip" && sourceFormat ? { source_format: sourceFormat } : {}),
     };
@@ -239,8 +288,12 @@ export default function TrimEditor({
     (s) => playhead > s.start + 0.25 && playhead < s.end - 0.25
   );
   const selected = segments.find((s) => s.id === selectedId);
+  const simpleKeep = isSimpleChronologicalKeep(segments);
+  const useFastCopy = simpleKeep && !forceReencode;
+  const willReencode = !useFastCopy;
 
   return (
+    <>
     <section className="v2-trim-panel" aria-label="Editor de recorte">
       <header className="v2-trim-header">
         <div>
@@ -385,6 +438,26 @@ export default function TrimEditor({
             </p>
           )}
 
+          <div className="v2-trim-export-mode">
+            {useFastCopy ? (
+              <span className="v2-trim-fast-badge" title="Cortes alinhados a keyframes; sem re-encode">
+                Modo rápido (sem re-encode)
+              </span>
+            ) : !simpleKeep ? (
+              <span className="v2-trim-export-hint">
+                Reordenar ou duplicar exige re-encode
+              </span>
+            ) : null}
+            <label className="v2-trim-precise">
+              <input
+                type="checkbox"
+                checked={forceReencode}
+                onChange={(e) => setForceReencode(e.target.checked)}
+              />
+              Corte preciso (re-encode)
+            </label>
+          </div>
+
           <div className="v2-trim-toolbar">
             <button
               type="button"
@@ -430,7 +503,7 @@ export default function TrimEditor({
             >
               Desfazer
             </button>
-            {nvencAvailable && (
+            {nvencAvailable && willReencode && (
               <label className="v2-trim-nvenc">
                 <input
                   type="checkbox"
@@ -527,5 +600,7 @@ export default function TrimEditor({
         </div>
       )}
     </section>
+    {confirmDialog}
+    </>
   );
 }

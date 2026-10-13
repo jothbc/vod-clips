@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { VideoSummary } from "../../api/v2";
+import VideoCardBadges from "./VideoCardBadges";
 
 interface Props {
   items: VideoSummary[];
@@ -48,7 +49,8 @@ export default function InfiniteFeed({ items, hasMore, loading, onLoadMore }: Pr
         {items.map((item) => (
           <Link key={item.id} to={`/watch/${item.id}`} className="v2-card">
             <div className="v2-card-thumb">
-              <video src={item.stream_url} muted preload="metadata" />
+              <video src={item.stream_url} muted preload="none" />
+              <VideoCardBadges item={item} />
             </div>
             <div className="v2-card-body">
               <p className="v2-card-title">{item.title}</p>

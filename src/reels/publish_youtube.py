@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 from urllib.parse import urlencode
 
 import httpx
+
+from reels.http_util import format_ssl_error, http_client
+from reels.twitch.download import clear_av_ssl_env
+
+logger = logging.getLogger(__name__)
 
 YOUTUBE_SCOPES = (
     "https://www.googleapis.com/auth/youtube.upload "
@@ -18,6 +25,15 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 UPLOAD_INIT = "https://www.googleapis.com/upload/youtube/v3/videos"
 API_BASE = "https://www.googleapis.com/youtube/v3"
+
+# Google requires chunk sizes that are multiples of 256 KiB (except the last chunk).
+_MIN_CHUNK = 256 * 1024
+# 64 MiB cuts RTT overhead on fast uplinks; override with YOUTUBE_UPLOAD_CHUNK_MB (1–64).
+_DEFAULT_CHUNK = 64 * 1024 * 1024
+_MAX_CHUNK_ATTEMPTS = 8
+_TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+TokenRefreshFn = Callable[[], str]
 
 
 def format_youtube_error(response: httpx.Response) -> str:
@@ -106,7 +122,7 @@ def exchange_code(
     cid, secret, redirect = _client_config(
         client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri
     )
-    with httpx.Client(timeout=60.0) as client:
+    with http_client(timeout=60.0) as client:
         r = client.post(
             TOKEN_URL,
             data={
@@ -128,7 +144,7 @@ def refresh_access_token(
     client_secret: str = "",
 ) -> dict[str, Any]:
     cid, secret, _redirect = _client_config(client_id=client_id, client_secret=client_secret)
-    with httpx.Client(timeout=60.0) as client:
+    with http_client(timeout=60.0) as client:
         r = client.post(
             TOKEN_URL,
             data={
@@ -143,7 +159,7 @@ def refresh_access_token(
 
 
 def fetch_channel_label(access_token: str) -> tuple[str, str]:
-    with httpx.Client(timeout=30.0) as client:
+    with http_client(timeout=30.0) as client:
         r = client.get(
             f"{API_BASE}/channels",
             params={"part": "snippet", "mine": "true"},
@@ -220,7 +236,7 @@ def init_resumable_upload(
         "X-Upload-Content-Type": "video/mp4",
         "X-Upload-Content-Length": str(video_path.stat().st_size),
     }
-    with httpx.Client(timeout=120.0) as client:
+    with http_client(timeout=120.0) as client:
         init = client.post(
             UPLOAD_INIT,
             params={"uploadType": "resumable", "part": "snippet,status"},
@@ -253,45 +269,202 @@ def apply_youtube_format(
     return out_title, out_desc, out_tags
 
 
+def upload_chunk_size(total_bytes: int = 0) -> int:
+    """Chunk size for resumable PUTs (multiple of 256 KiB, except last chunk)."""
+    raw = os.environ.get("YOUTUBE_UPLOAD_CHUNK_MB", "").strip()
+    if raw:
+        try:
+            mb = max(1, min(64, int(raw)))
+            size = mb * 1024 * 1024
+        except ValueError:
+            size = _DEFAULT_CHUNK
+    else:
+        size = _DEFAULT_CHUNK
+    size = max(_MIN_CHUNK, (size // _MIN_CHUNK) * _MIN_CHUNK)
+    if total_bytes > 0:
+        size = min(size, total_bytes)
+    return size
+
+
+def _parse_range_header(range_header: str | None) -> int:
+    """Return next byte offset from a Range response header (bytes=0-N → N+1)."""
+    if not range_header:
+        return 0
+    text = range_header.strip()
+    if "=" in text:
+        text = text.split("=", 1)[1]
+    if "-" not in text:
+        return 0
+    end_s = text.split("-", 1)[1].strip()
+    try:
+        return int(end_s) + 1
+    except ValueError:
+        return 0
+
+
+def _query_upload_status(
+    client: httpx.Client,
+    upload_url: str,
+    access_token: str,
+    total: int,
+) -> tuple[int, dict[str, Any] | None]:
+    """Ask Google how many bytes it already has. Returns (offset, completed_body|None)."""
+    r = client.put(
+        upload_url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Length": "0",
+            "Content-Range": f"bytes */{total}",
+        },
+        content=b"",
+    )
+    if r.status_code in (200, 201):
+        _raise_for_youtube(r)
+        return total, (r.json() if r.content else {})
+    if r.status_code == 308:
+        return _parse_range_header(r.headers.get("Range")), None
+    if r.status_code == 404:
+        raise RuntimeError("YouTube upload session expired; start a new publish")
+    _raise_for_youtube(r)
+    return 0, None
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
+        # CERTIFICATE_VERIFY_FAILED is a ConnectError subclass — do not retry forever.
+        msg = str(exc).lower()
+        if "certificate" in msg or "ssl" in msg:
+            return False
+        return True
+    return False
+
+
+def _network_error_message(exc: BaseException) -> str:
+    return f"YouTube upload network error: {format_ssl_error(exc)}"
+
+
 def _upload_resumable(
     access_token: str,
     upload_url: str,
     video_path: Path,
     *,
     on_progress: Callable[[float], None] | None = None,
+    refresh_access_token_fn: TokenRefreshFn | None = None,
 ) -> dict[str, Any]:
     total = video_path.stat().st_size
     if total <= 0:
         raise RuntimeError("Video file is empty")
-    chunk_size = 256 * 1024
+    chunk_size = upload_chunk_size(total)
+    token = access_token
     uploaded = 0
-    with httpx.Client(timeout=600.0) as client:
+    # Long enough for a 64 MB chunk on a slow uplink; connection reuse amortizes TLS.
+    timeout = httpx.Timeout(connect=30.0, read=600.0, write=600.0, pool=30.0)
+
+    with http_client(timeout=timeout) as client:
         with video_path.open("rb") as f:
             while uploaded < total:
-                chunk = f.read(chunk_size)
+                to_read = min(chunk_size, total - uploaded)
+                f.seek(uploaded)
+                chunk = f.read(to_read)
                 if not chunk:
                     break
                 start = uploaded
                 end = uploaded + len(chunk) - 1
-                headers: dict[str, str] = {
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "video/mp4",
-                    "Content-Length": str(len(chunk)),
-                }
-                if total > len(chunk) or end < total - 1:
-                    headers["Content-Range"] = f"bytes {start}-{end}/{total}"
-                r = client.put(upload_url, headers=headers, content=chunk)
-                if r.status_code == 308:
-                    uploaded = end + 1
-                elif r.status_code in (200, 201):
-                    uploaded = total
+                succeeded = False
+
+                for attempt in range(_MAX_CHUNK_ATTEMPTS):
+                    headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "video/mp4",
+                        "Content-Length": str(len(chunk)),
+                        "Content-Range": f"bytes {start}-{end}/{total}",
+                    }
+                    try:
+                        r = client.put(upload_url, headers=headers, content=chunk)
+                    except Exception as exc:
+                        if not _is_transient_error(exc):
+                            raise RuntimeError(_network_error_message(exc)) from exc
+                        if attempt + 1 >= _MAX_CHUNK_ATTEMPTS:
+                            raise RuntimeError(
+                                f"YouTube upload network error after retries: {format_ssl_error(exc)}"
+                            ) from exc
+                        delay = min(60.0, 1.5**attempt)
+                        logger.warning(
+                            "YouTube chunk network error at %s-%s (attempt %s): %s; retry in %.1fs",
+                            start,
+                            end,
+                            attempt + 1,
+                            exc,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        try:
+                            uploaded, done = _query_upload_status(client, upload_url, token, total)
+                            if done is not None:
+                                if on_progress:
+                                    on_progress(1.0)
+                                return done
+                            if uploaded != start:
+                                succeeded = True
+                                break
+                        except Exception:
+                            pass
+                        continue
+
+                    if r.status_code == 308:
+                        uploaded = end + 1
+                        succeeded = True
+                        break
+
+                    if r.status_code in (200, 201):
+                        if on_progress:
+                            on_progress(1.0)
+                        _raise_for_youtube(r)
+                        return r.json() if r.content else {}
+
+                    if r.status_code == 401 and refresh_access_token_fn is not None:
+                        try:
+                            token = refresh_access_token_fn()
+                            logger.info("Refreshed YouTube access token mid-upload")
+                            continue
+                        except Exception as exc:
+                            raise RuntimeError(
+                                f"YouTube upload unauthorized and token refresh failed: {exc}"
+                            ) from exc
+
+                    if r.status_code in _TRANSIENT_STATUS and attempt + 1 < _MAX_CHUNK_ATTEMPTS:
+                        delay = min(60.0, 1.5**attempt)
+                        logger.warning(
+                            "YouTube chunk PUT %s at %s-%s (attempt %s); retry in %.1fs",
+                            r.status_code,
+                            start,
+                            end,
+                            attempt + 1,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        try:
+                            uploaded, done = _query_upload_status(client, upload_url, token, total)
+                            if done is not None:
+                                if on_progress:
+                                    on_progress(1.0)
+                                return done
+                            if uploaded != start:
+                                succeeded = True
+                                break
+                        except Exception:
+                            pass
+                        continue
+
                     _raise_for_youtube(r)
-                    return r.json() if r.content else {}
-                else:
-                    _raise_for_youtube(r)
-                    return r.json() if r.content else {}
+                    raise RuntimeError(format_youtube_error(r))
+
+                if not succeeded:
+                    raise RuntimeError("YouTube upload failed after retries")
+
                 if on_progress:
                     on_progress(min(1.0, uploaded / total))
+
     raise RuntimeError("YouTube upload incomplete")
 
 
@@ -355,8 +528,10 @@ def upload_video(
     language: str = "pt",
     youtube_format: str = "video",
     on_progress: Callable[[float], None] | None = None,
+    refresh_access_token_fn: TokenRefreshFn | None = None,
 ) -> str:
     """Resumable upload; returns YouTube video id."""
+    clear_av_ssl_env()
     if not video_path.is_file():
         raise FileNotFoundError(str(video_path))
     title, description, tags = apply_youtube_format(title, description, tags, youtube_format)
@@ -371,7 +546,13 @@ def upload_video(
         made_for_kids=made_for_kids,
         language=language,
     )
-    body = _upload_resumable(access_token, upload_url, video_path, on_progress=on_progress)
+    body = _upload_resumable(
+        access_token,
+        upload_url,
+        video_path,
+        on_progress=on_progress,
+        refresh_access_token_fn=refresh_access_token_fn,
+    )
     vid = body.get("id")
     if not vid:
         raise RuntimeError("YouTube upload response missing video id")
@@ -382,7 +563,7 @@ def set_thumbnail(access_token: str, video_id: str, thumbnail_path: Path) -> Non
     if not thumbnail_path.is_file():
         return
     url = f"https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
-    with httpx.Client(timeout=120.0) as client:
+    with http_client(timeout=120.0) as client:
         with thumbnail_path.open("rb") as f:
             r = client.post(
                 url,

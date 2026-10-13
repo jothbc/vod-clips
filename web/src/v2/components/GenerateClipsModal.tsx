@@ -7,13 +7,14 @@ import {
   type ResolutionPreset,
   type VideoDetail,
 } from "../../api/v2";
-import ExportResolutionPicker from "../../components/ExportResolutionPicker";
+import ExportResolutionPicker from "./ExportResolutionPicker";
 import { formatMmSs, formatRange, parseMmSs } from "../../utils/timeFormat";
 import DockTooltip from "./DockTooltip";
 import JobProgressBar from "./JobProgressBar";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useV2Job } from "../hooks/useV2Job";
 
-type Step = "idle" | "analyzing" | "review" | "exporting" | "done";
+type Step = "loading" | "idle" | "analyzing" | "review" | "exporting" | "done";
 
 interface Props {
   video: VideoDetail;
@@ -84,8 +85,9 @@ function TimeInput({
 }
 
 export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, onDone }: Props) {
-  const [step, setStep] = useState<Step>("idle");
+  const [step, setStep] = useState<Step>("loading");
   const [highlights, setHighlights] = useState<HighlightRow[]>([]);
+  const [fromPersisted, setFromPersisted] = useState(false);
   const [exportedCount, setExportedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [maxClips, setMaxClips] = useState(15);
@@ -97,23 +99,46 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
   const [reelsPresets, setReelsPresets] = useState<ResolutionPreset[]>([]);
   const [youtubeResolution, setYoutubeResolution] = useState<ResolutionPreset | null>(null);
   const [reelsResolution, setReelsResolution] = useState<ResolutionPreset | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
 
   const hasWebcamRegion = Boolean(video.has_webcam_region);
 
-  const applyHighlightsResponse = useCallback((data: Awaited<ReturnType<typeof fetchHighlights>>) => {
-    setHighlights(mapHighlights(data.highlights, hasWebcamRegion));
-    if (data.source_width) setSourceWidth(data.source_width);
-    if (data.source_height) setSourceHeight(data.source_height);
-    if (data.youtube_presets) setYoutubePresets(data.youtube_presets);
-    if (data.reels_presets) setReelsPresets(data.reels_presets);
-    if (data.default_youtube) setYoutubeResolution(data.default_youtube);
-    if (data.default_reels) setReelsResolution(data.default_reels);
-  }, [hasWebcamRegion]);
+  const applyHighlightsResponse = useCallback(
+    (data: Awaited<ReturnType<typeof fetchHighlights>>, persisted: boolean) => {
+      setHighlights(mapHighlights(data.highlights, hasWebcamRegion));
+      setFromPersisted(persisted);
+      if (data.source_width) setSourceWidth(data.source_width);
+      if (data.source_height) setSourceHeight(data.source_height);
+      if (data.youtube_presets) setYoutubePresets(data.youtube_presets);
+      if (data.reels_presets) setReelsPresets(data.reels_presets);
+      if (data.default_youtube) setYoutubeResolution(data.default_youtube);
+      if (data.default_reels) setReelsResolution(data.default_reels);
+    },
+    [hasWebcamRegion]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchHighlights(video.id);
+        if (cancelled) return;
+        applyHighlightsResponse(data, true);
+        setStep("review");
+      } catch {
+        if (cancelled) return;
+        setStep("idle");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [video.id, applyHighlightsResponse]);
 
   const onAnalyzeDone = useCallback(async () => {
     try {
       const data = await fetchHighlights(video.id);
-      applyHighlightsResponse(data);
+      applyHighlightsResponse(data, false);
       setStep("review");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao carregar highlights");
@@ -121,19 +146,25 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
     }
   }, [applyHighlightsResponse, video.id]);
 
-  const onExportDone = useCallback(() => {
+  const onExportDone = useCallback(async () => {
     const count = highlights.filter((h) => h.export_youtube || h.export_reels).length;
     setExportedCount(count);
-    setStep("done");
-  }, [highlights]);
+    try {
+      const data = await fetchHighlights(video.id);
+      applyHighlightsResponse(data, true);
+      setStep("review");
+    } catch {
+      setStep("done");
+    }
+  }, [applyHighlightsResponse, highlights, video.id]);
 
   const { job, running, waitForJob, cancel, error: jobError } = useV2Job({
     onCompleted: (state) => {
       if (state.feature === "v2_analyze") void onAnalyzeDone();
-      else if (state.feature === "v2_export_clips") onExportDone();
+      else if (state.feature === "v2_export_clips") void onExportDone();
     },
     onFailed: () => {
-      setStep((s) => (s === "analyzing" ? "idle" : s === "exporting" ? "review" : s));
+      setStep((s) => (s === "analyzing" ? (fromPersisted || highlights.length ? "review" : "idle") : s === "exporting" ? "review" : s));
     },
   });
 
@@ -145,8 +176,19 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
       waitForJob(job_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao iniciar análise");
-      setStep("idle");
+      setStep(highlights.length ? "review" : "idle");
     }
+  }
+
+  async function startReanalyze() {
+    const ok = await confirm({
+      title: "Reanalisar highlights?",
+      message: "Reanalisar apaga a lista atual de highlights e roda a análise de novo.",
+      confirmLabel: "Reanalisar",
+      danger: true,
+    });
+    if (!ok) return;
+    await startAnalyze();
   }
 
   async function startExport() {
@@ -184,23 +226,44 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
     setHighlights((prev) => prev.map((h) => (h.index === index ? { ...h, ...patch } : h)));
   }
 
-  function handleClose() {
+  async function handleClose() {
     if (running) {
-      if (!window.confirm("Um job está em execução. Fechar o modal? O processamento continua em segundo plano.")) {
-        return;
-      }
+      const ok = await confirm({
+        title: "Fechar modal?",
+        message: "Um job está em execução. O processamento continua em segundo plano.",
+        confirmLabel: "Fechar mesmo assim",
+      });
+      if (!ok) return;
     }
     onClose();
   }
 
   const displayError = error || jobError;
 
+  function renderMaxClipsField(id: string) {
+    return (
+      <label className="v2-field" htmlFor={id}>
+        Quantidade de highlights
+        <input
+          id={id}
+          type="number"
+          min={1}
+          max={50}
+          value={maxClips}
+          disabled={running}
+          onChange={(e) => setMaxClips(Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 15)))}
+        />
+      </label>
+    );
+  }
+
   return (
-    <div className="v2-modal-backdrop" onClick={handleClose}>
+    <>
+    <div className="v2-modal-backdrop" onClick={() => void handleClose()}>
       <div className="v2-modal v2-modal--wide" onClick={(e) => e.stopPropagation()}>
         <div className="v2-modal-header">
           <h2>Gerar clips</h2>
-          <button type="button" className="v2-btn v2-btn--ghost" onClick={handleClose}>
+          <button type="button" className="v2-btn v2-btn--ghost" onClick={() => void handleClose()}>
             Fechar
           </button>
         </div>
@@ -221,22 +284,14 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
             <JobProgressBar job={job} onCancel={() => void cancel()} />
           )}
 
+          {step === "loading" && <p className="v2-card-meta">Carregando highlights salvos…</p>}
+
           {step === "idle" && (
-            <div>
+            <div className="v2-clips-analyze-panel">
               <p className="v2-card-meta">
                 Analise o vídeo para detectar highlights. Nada roda automaticamente — clique para iniciar.
               </p>
-              <label className="v2-field" htmlFor="v2-max-highlights">
-                Quantidade de highlights
-                <input
-                  id="v2-max-highlights"
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={maxClips}
-                  onChange={(e) => setMaxClips(Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 15)))}
-                />
-              </label>
+              {renderMaxClipsField("v2-max-highlights")}
               <button type="button" className="v2-btn v2-btn--primary" onClick={() => void startAnalyze()}>
                 Analisar highlights
               </button>
@@ -245,6 +300,20 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
 
           {step === "review" && (
             <>
+              <div className="v2-clips-pending-banner">
+                <div>
+                  <strong>
+                    {fromPersisted
+                      ? "Previamente analisados e não gerados"
+                      : "Highlights analisados"}
+                  </strong>
+                  <p className="v2-card-meta">
+                    {highlights.length} item(ns). Fechar o modal não perde esta lista — ela fica salva
+                    até você exportar ou reanalisar.
+                  </p>
+                </div>
+              </div>
+
               <ul className="v2-highlights-list">
                 {highlights.map((h) => (
                   <li key={h.index} className="v2-highlight-item">
@@ -302,13 +371,21 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
                           Mobile
                         </label>
                         {h.export_reels && (
-                          <DockTooltip text={hasWebcamRegion ? "Incluir faixa da webcam no topo do mobile" : WEBCAM_HINT}>
+                          <DockTooltip
+                            text={
+                              hasWebcamRegion
+                                ? "Incluir faixa da webcam no topo do mobile"
+                                : WEBCAM_HINT
+                            }
+                          >
                             <label className={!hasWebcamRegion ? "v2-label--disabled" : ""}>
                               <input
                                 type="checkbox"
                                 checked={h.include_webcam}
                                 disabled={!hasWebcamRegion}
-                                onChange={(e) => updateRow(h.index, { include_webcam: e.target.checked })}
+                                onChange={(e) =>
+                                  updateRow(h.index, { include_webcam: e.target.checked })
+                                }
                               />{" "}
                               Incluir webcam
                             </label>
@@ -320,6 +397,7 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
                   </li>
                 ))}
               </ul>
+
               <details className="v2-collapsible" open>
                 <summary>Configurações de exportação</summary>
                 <div className="v2-collapsible-content">
@@ -358,21 +436,41 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
                   </div>
                 </div>
               </details>
-              <button
-                type="button"
-                className="v2-btn v2-btn--primary"
-                style={{ marginTop: 16 }}
-                disabled={running}
-                onClick={() => void startExport()}
-              >
-                Exportar selecionados
-              </button>
+
+              <div className="v2-modal-actions" style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="v2-btn v2-btn--primary"
+                  disabled={running}
+                  onClick={() => void startExport()}
+                >
+                  Exportar selecionados
+                </button>
+              </div>
+
+              <div className="v2-clips-reanalyze">
+                <p className="v2-card-meta">
+                  Quer refazer a análise? Isso apaga a lista acima e gera uma nova.
+                </p>
+                {renderMaxClipsField("v2-max-highlights-reanalyze")}
+                <button
+                  type="button"
+                  className="v2-btn"
+                  disabled={running}
+                  onClick={() => void startReanalyze()}
+                >
+                  Reanalisar highlights
+                </button>
+              </div>
             </>
           )}
 
           {step === "done" && (
             <div>
-              <p className="v2-card-meta">Exportação concluída — {exportedCount} clip(s) processado(s).</p>
+              <p className="v2-card-meta">
+                Exportação concluída — {exportedCount} clip(s) processado(s). Não restam highlights
+                pendentes.
+              </p>
               <button type="button" className="v2-btn v2-btn--primary" onClick={onDone}>
                 Fechar
               </button>
@@ -381,5 +479,7 @@ export default function GenerateClipsModal({ video, playerRef, onSeek, onClose, 
         </div>
       </div>
     </div>
+    {confirmDialog}
+    </>
   );
 }

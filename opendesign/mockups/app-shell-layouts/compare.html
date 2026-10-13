@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>App shell — 3 layout variations</title>
+  <link rel="stylesheet" href="../../design-systems/reels-product/tokens/colors_and_type.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--surface-primary);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      font-size: var(--body);
+      line-height: 1.45;
+    }
+    .page {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: var(--space-5) var(--space-4) var(--space-7);
+    }
+    .intro h1 {
+      font-family: var(--font-display);
+      font-size: var(--type-3xl);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 var(--space-2);
+    }
+    .intro h1 span { color: var(--action-primary); }
+    .intro p {
+      color: var(--text-muted);
+      max-width: 52rem;
+      margin: 0 0 var(--space-5);
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-bottom: var(--space-6);
+    }
+    .chip {
+      font-size: var(--label);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+    .chip strong { color: var(--action-primary); font-weight: 600; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-4);
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-head {
+      padding: var(--space-4);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .card-head .tag {
+      font-size: var(--label);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--action-primary);
+      margin: 0 0 var(--space-1);
+    }
+    .card-head h2 {
+      font-family: var(--font-display);
+      font-size: var(--h2);
+      margin: 0 0 var(--space-2);
+      font-weight: 600;
+    }
+    .card-head p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: var(--caption);
+    }
+    .thumb {
+      aspect-ratio: 4 / 5;
+      background:
+        linear-gradient(160deg, var(--surface-card) 0%, #0a0c0f 100%);
+      border-bottom: 1px solid var(--border-subtle);
+      position: relative;
+      padding: 10px;
+    }
+    .mini {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      gap: 4px;
+      font-size: 9px;
+      color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+    }
+    .blk {
+      background: rgba(255,255,255,0.06);
+      border: 1px dashed rgba(255,255,255,0.18);
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2px;
+    }
+    .blk.hot {
+      border-color: var(--action-primary);
+      color: var(--action-primary);
+      background: var(--action-primary-soft);
+    }
+    .card-foot {
+      padding: var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      flex: 1;
+    }
+    .axes {
+      margin: 0;
+      padding-left: 1.1rem;
+      color: var(--text-muted);
+      font-size: var(--caption);
+    }
+    .axes li { margin-bottom: 4px; }
+    .link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: auto;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--action-primary);
+      color: #1a1208;
+      font-weight: 600;
+      text-decoration: none;
+      font-size: var(--caption);
+    }
+    .link:hover { filter: brightness(1.05); }
+
+    /* Mini layouts */
+    .a-home {
+      grid-template-rows: 14px 28% 14% 14% 1fr;
+    }
+    .a-home .hdr { grid-column: 1 / -1; }
+    .b-home {
+      grid-template-rows: 1fr 18px;
+      grid-template-columns: 1fr;
+    }
+    .b-stage {
+      display: grid;
+      grid-template-rows: 12% 1fr 18%;
+      gap: 4px;
+      height: 100%;
+    }
+    .c-home {
+      grid-template-columns: 22% 1fr 26%;
+      grid-template-rows: 14px 1fr;
+      gap: 4px;
+    }
+    .c-home .hdr { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="intro">
+      <h1>Reels<span>.</span> — 3 app shells</h1>
+      <p>
+        Mid-fi explorations for the full product shell (home + watch + chrome).
+        System loaded: <code>design-systems/reels-product</code>.
+        Spread: layout structure × interaction model × metaphor. Density mid, novelty bold.
+        Option A evolves the current rails pattern; B and C are structural forks.
+      </p>
+    </header>
+    <div class="meta">
+      <span class="chip">Fidelity <strong>mid</strong></span>
+      <span class="chip">Count <strong>3</strong></span>
+      <span class="chip">Audience <strong>solo local</strong></span>
+      <span class="chip">Constraint <strong>layout livre</strong></span>
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <div class="card-head">
+          <p class="tag">A · Evolved</p>
+          <h2>Rails studio</h2>
+          <p>Refine the current Netflix-like shell: sticky header, hero carousel, thematic rows, library grid — with a persistent tool rail.</p>
+        </div>
+        <div class="thumb">
+          <div class="mini a-home">
+            <div class="blk hdr">header · search · jobs</div>
+            <div class="blk hot">hero carousel</div>
+            <div class="blk">row · VODs</div>
+            <div class="blk">row · clips</div>
+            <div class="blk">library grid</div>
+          </div>
+        </div>
+        <div class="card-foot">
+          <ul class="axes">
+            <li><strong>Layout:</strong> vertical stack + sticky top</li>
+            <li><strong>Interaction:</strong> browse → open watch</li>
+            <li><strong>Tone:</strong> editorial studio (current DNA)</li>
+          </ul>
+          <a class="link" href="a-rails-studio.html">Open full mockup</a>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <p class="tag">B · Novel</p>
+          <h2>Cinema stage</h2>
+          <p>Player is the product. Library becomes a vertical timeline under / beside a black stage; chrome collapses to a cinema bar.</p>
+        </div>
+        <div class="thumb">
+          <div class="mini b-home">
+            <div class="b-stage">
+              <div class="blk">cinema bar · Reels. · mode</div>
+              <div class="blk hot">STAGE · active media</div>
+              <div class="blk">timeline strip · next clips</div>
+            </div>
+            <div class="blk">scrub / jobs whisper</div>
+          </div>
+        </div>
+        <div class="card-foot">
+          <ul class="axes">
+            <li><strong>Layout:</strong> stage-dominant, chrome minimal</li>
+            <li><strong>Interaction:</strong> watch-first, browse as strip</li>
+            <li><strong>Tone:</strong> broadcast / darkroom</li>
+          </ul>
+          <a class="link" href="b-cinema-stage.html">Open full mockup</a>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <p class="tag">C · Novel</p>
+          <h2>Split bay</h2>
+          <p>Editing bay: left media rail, center canvas, right ops (jobs, publish, system). Home and watch share one workspace frame.</p>
+        </div>
+        <div class="thumb">
+          <div class="mini c-home">
+            <div class="blk hdr">command strip</div>
+            <div class="blk">media rail</div>
+            <div class="blk hot">canvas / player</div>
+            <div class="blk">ops · jobs · publish</div>
+          </div>
+        </div>
+        <div class="card-foot">
+          <ul class="axes">
+            <li><strong>Layout:</strong> 3-pane workspace</li>
+            <li><strong>Interaction:</strong> select → act without leaving</li>
+            <li><strong>Tone:</strong> pro tools / control room</li>
+          </ul>
+          <a class="link" href="c-split-bay.html">Open full mockup</a>
+        </div>
+      </article>
+    </div>
+  </div>
+</body>
+</html>

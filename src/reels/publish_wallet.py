@@ -6,13 +6,14 @@ import json
 import os
 import sqlite3
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from reels.db.connection import connection as _conn
+from reels.db.migrate import init_db
 from reels.storage import temp_root
 
 PublishPlatform = Literal["youtube", "instagram", "tiktok"]
@@ -65,10 +66,6 @@ DEFAULT_OAUTH_REDIRECT: dict[PublishPlatform, str] = {
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def wallet_db_path() -> Path:
-    return temp_root() / "publish_wallet.db"
 
 
 def _key_path() -> Path:
@@ -188,55 +185,9 @@ def get_target_oauth_credentials(target: PublishTarget) -> dict[str, str]:
     }
 
 
-@contextmanager
-def _conn():
-    path = wallet_db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
-    con.row_factory = sqlite3.Row
-    try:
-        yield con
-        con.commit()
-    finally:
-        con.close()
-
-
 def init_wallet_db() -> None:
-    with _conn() as con:
-        con.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS publish_targets (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                platform TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                config_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS publish_credentials (
-                target_id TEXT PRIMARY KEY,
-                access_token TEXT NOT NULL DEFAULT '',
-                refresh_token TEXT NOT NULL DEFAULT '',
-                expires_at TEXT,
-                scopes TEXT NOT NULL DEFAULT '',
-                account_label TEXT NOT NULL DEFAULT '',
-                account_id TEXT NOT NULL DEFAULT '',
-                FOREIGN KEY (target_id) REFERENCES publish_targets(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS publish_history (
-                id TEXT PRIMARY KEY,
-                target_id TEXT NOT NULL,
-                video_id TEXT NOT NULL DEFAULT '',
-                job_id TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL,
-                platform_post_id TEXT NOT NULL DEFAULT '',
-                error TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (target_id) REFERENCES publish_targets(id) ON DELETE CASCADE
-            );
-            """
-        )
+    """Ensure the unified schema (including wallet tables) is applied."""
+    init_db()
 
 
 def _default_config(platform: PublishPlatform) -> dict[str, Any]:
@@ -441,4 +392,11 @@ def add_history(
                 _utc_now(),
             ),
         )
+    if status == "published" and video_id:
+        try:
+            from reels import video_repo
+
+            video_repo.set_published(video_id, True)
+        except Exception:
+            pass
     return hid

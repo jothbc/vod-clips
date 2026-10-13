@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
+import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -14,6 +18,9 @@ VODS_SUBDIR = "vods"
 OUTPUTS_SUBDIR = "outputs"
 CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024  # 50 GB
+# Windows often keeps a video handle open for a moment after the player stops.
+_DELETE_ATTEMPTS = 6
+_DELETE_BACKOFF_S = 0.25
 
 
 def project_root() -> Path:
@@ -94,25 +101,73 @@ async def stream_upload_to_temp(file_obj, filename: str) -> tuple[Path, int]:
 
 
 def delete_path(path: Path) -> int:
-    """Remove file or directory tree; return bytes freed (estimate)."""
+    """Remove a file or directory tree and return the bytes freed.
+
+    Raises OSError when the path is still present after retries. A locked file
+    must not be reported as deleted: callers (and the next startup sync) would
+    treat the video as gone while the bytes stay on disk.
+    """
     path = path.resolve()
     if not path.exists():
         return 0
 
-    freed = 0
-    if path.is_file():
-        freed = path.stat().st_size
-        path.unlink()
-        return freed
+    freed = _bytes_under(path)
+    last_error: BaseException | None = None
+    for attempt in range(_DELETE_ATTEMPTS):
+        try:
+            if path.is_dir() and not path.is_symlink():
+                _rmtree(path)
+            else:
+                _force_writable(path)
+                path.unlink()
+        except FileNotFoundError:
+            return freed
+        except OSError as exc:
+            last_error = exc
+        if not path.exists():
+            return freed
+        if attempt + 1 < _DELETE_ATTEMPTS:
+            time.sleep(_DELETE_BACKOFF_S * (attempt + 1))
+    raise OSError(f"Could not delete {path}") from last_error
 
-    for p in path.rglob("*"):
-        if p.is_file():
+
+def _bytes_under(path: Path) -> int:
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for child in path.rglob("*"):
+        if child.is_file():
             try:
-                freed += p.stat().st_size
+                total += child.stat().st_size
             except OSError:
                 pass
-    shutil.rmtree(path, ignore_errors=True)
-    return freed
+    return total
+
+
+def _force_writable(path: Path) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+
+
+def _retry_writable(func, target, _exc) -> None:
+    _force_writable(Path(target))
+    func(target)
+
+
+def _rmtree(path: Path) -> None:
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_retry_writable)
+        return
+
+    def _onerror(func, target, _exc_info):
+        _retry_writable(func, target, None)
+
+    shutil.rmtree(path, onerror=_onerror)
 
 
 def list_stored_vods() -> list[dict]:

@@ -103,7 +103,6 @@ def test_suggest_requires_transcript(client, tmp_path):
 def test_deploy_accepts_session_id(client, video_with_transcript, monkeypatch, tmp_path):
     import reels.publish_wallet as pw
 
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
 
     class _SyncThread:
@@ -155,7 +154,6 @@ def test_deploy_accepts_session_id(client, video_with_transcript, monkeypatch, t
 def test_deploy_failure_with_session_records_history(client, video_with_transcript, monkeypatch, tmp_path):
     import reels.publish_wallet as pw
 
-    monkeypatch.setattr(pw, "wallet_db_path", lambda: tmp_path / "temp" / "publish_wallet.db")
     monkeypatch.setattr(pw, "_key_path", lambda: tmp_path / "temp" / ".publish_key")
 
     class _SyncThread:

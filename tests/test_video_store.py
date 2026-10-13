@@ -114,3 +114,101 @@ def test_search_videos_matches_title_and_clip(video_root):
     assert by_clip[0].title == "Epic Highlight"
 
     assert vs.search_videos("missing") == []
+
+
+def test_delete_vod_removes_files_and_is_not_restored(video_root):
+    from reels import video_repo
+
+    slug = "vod_gone"
+    vs.original_dir(slug).mkdir(parents=True)
+    vs.source_path(slug).write_bytes(b"\x00" * 1000)
+    vs.save_metadata(VideoMetadata(slug=slug, title="Gone", kind="original", duration=10.0, size_bytes=1000))
+
+    freed = vs.delete_video(slug)
+    assert freed >= 1000
+    assert not vs.video_dir(slug).exists()
+    assert video_repo.resolve(slug) is None
+
+    vs.sync_from_filesystem()
+    assert video_repo.resolve(slug) is None
+    assert not vs.video_dir(slug).exists()
+
+
+def test_delete_vod_purges_db_when_folder_already_gone(video_root):
+    import shutil
+
+    from reels import video_repo
+
+    slug = "vod_manual"
+    vs.original_dir(slug).mkdir(parents=True)
+    vs.source_path(slug).write_bytes(b"\x00" * 100)
+    vs.save_metadata(VideoMetadata(slug=slug, title="Manual", kind="original", duration=10.0))
+    shutil.rmtree(vs.video_dir(slug))
+
+    assert vs.delete_video(slug) == 0
+    assert video_repo.resolve(slug) is None
+
+
+def test_delete_vod_removes_job_output_outside_video_tree(video_root, monkeypatch, tmp_path):
+    from reels import job_store, video_repo
+
+    monkeypatch.setattr(vs, "temp_root", lambda: tmp_path)
+    slug = "vod_jobs"
+    vs.original_dir(slug).mkdir(parents=True)
+    vs.source_path(slug).write_bytes(b"\x00" * 40)
+    vs.save_metadata(VideoMetadata(slug=slug, title="Jobs", kind="original", duration=10.0, size_bytes=40))
+    rec = video_repo.resolve(slug)
+    assert rec is not None
+
+    out = tmp_path / "outputs" / "job-1"
+    out.mkdir(parents=True)
+    (out / "export.mp4").write_bytes(b"\x00" * 80)
+    job_store.insert_job(
+        job_id="job-1",
+        video_id=rec.id,
+        feature="v2_captions",
+        params={},
+        params_hash="abc",
+        status="completed",
+        output_dir=str(out),
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    vs.delete_video(slug)
+    assert not out.exists()
+    assert job_store.get_job("job-1") is None
+    assert video_repo.resolve(slug) is None
+
+
+def test_sync_prunes_row_when_folder_is_missing(video_root):
+    import shutil
+
+    from reels import video_repo
+
+    slug = "vod_pruned"
+    vs.original_dir(slug).mkdir(parents=True)
+    vs.source_path(slug).write_bytes(b"\x00" * 20)
+    vs.save_metadata(VideoMetadata(slug=slug, title="Pruned", kind="original", duration=5.0))
+    shutil.rmtree(vs.video_dir(slug))
+
+    result = vs.sync_from_filesystem()
+    assert result["orphans_pruned"] >= 1
+    assert video_repo.resolve(slug) is None
+
+
+def test_delete_path_raises_when_files_remain(tmp_path, monkeypatch):
+    import reels.storage as storage
+
+    target = tmp_path / "locked"
+    target.mkdir()
+    (target / "source.mp4").write_bytes(b"\x00" * 10)
+    monkeypatch.setattr(storage, "_DELETE_ATTEMPTS", 1)
+
+    def _leave_in_place(path, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage.shutil, "rmtree", _leave_in_place)
+    with pytest.raises(OSError):
+        storage.delete_path(target)
+    assert target.is_dir()
+    assert (target / "source.mp4").is_file()

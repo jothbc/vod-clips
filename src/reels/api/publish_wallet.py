@@ -358,6 +358,27 @@ def _execute_deploy(deploy_id: str, body: DeployBody) -> None:
             youtube_format = str(overrides.get("youtube_format") or cfg.get("youtube_format") or "video")
             total_bytes = video_path.stat().st_size if video_path.is_file() else 0
 
+            def refresh_token_for_upload() -> str:
+                nonlocal access
+                if not refresh:
+                    raise RuntimeError("No refresh token available for YouTube re-auth")
+                refreshed = refresh_access_token(
+                    refresh,
+                    client_id=oauth["client_id"],
+                    client_secret=oauth["client_secret"],
+                )
+                access = refreshed.get("access_token", "")
+                if not access:
+                    raise RuntimeError("YouTube token refresh returned empty access_token")
+                save_credentials(
+                    body.target_id,
+                    access_token=access,
+                    refresh_token=refresh,
+                    account_label=creds.get("account_label", ""),
+                    account_id=creds.get("account_id", ""),
+                )
+                return access
+
             def on_upload_progress(ratio: float) -> None:
                 pct = 10 + ratio * 75
                 mb_done = int(ratio * total_bytes / (1024 * 1024)) if total_bytes else 0
@@ -378,6 +399,7 @@ def _execute_deploy(deploy_id: str, body: DeployBody) -> None:
                 language=str(cfg.get("default_language", "pt")),
                 youtube_format=youtube_format,
                 on_progress=on_upload_progress,
+                refresh_access_token_fn=refresh_token_for_upload if refresh else None,
             )
             if thumb_path and thumb_path.is_file():
                 update_deploy(deploy_id, phase="thumbnail", percent=90, message="Enviando capa…")

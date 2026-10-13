@@ -172,5 +172,24 @@ def load_highlights(path: Path) -> HighlightsDocument:
     return HighlightsDocument.model_validate(data)
 
 
+def prune_exported_highlights(path: Path, exported_indices: set[int]) -> HighlightsDocument | None:
+    """Remove highlights by list index after export. Deletes the file if none remain.
+
+    Returns the remaining document, or None if the file was removed / missing.
+    """
+    if not path.is_file():
+        return None
+    doc = load_highlights(path)
+    if not exported_indices:
+        return doc
+    remaining = [h for i, h in enumerate(doc.highlights) if i not in exported_indices]
+    if not remaining:
+        path.unlink(missing_ok=True)
+        return None
+    doc.highlights = remaining
+    write_highlights(path, doc)
+    return doc
+
+
 def _key(start: float, end: float) -> str:
     return f"{start:.2f}-{end:.2f}"

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { VideoSummary } from "../../api/v2";
+import VideoCardBadges from "./VideoCardBadges";
 
 interface Props {
   title: string;
@@ -29,12 +30,8 @@ export default function HorizontalRow({ title, items, vertical }: Props) {
             className={`v2-card${vertical ? " v2-card--vertical" : ""}`}
           >
             <div className="v2-card-thumb">
-              <video src={item.stream_url} muted preload="metadata" />
-              {item.kind === "clip" && (
-                <span className="v2-card-badge">
-                  {item.format === "reels" ? "Mobile" : item.format === "youtube" ? "Desktop" : item.format || "clip"}
-                </span>
-              )}
+              <video src={item.stream_url} muted preload="none" />
+              <VideoCardBadges item={item} />
             </div>
             <div className="v2-card-body">
               <p className="v2-card-title">{item.title}</p>

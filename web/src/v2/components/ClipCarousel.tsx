@@ -37,7 +37,7 @@ export default function ClipCarousel({ clips }: Props) {
           {clip.thumbnail_url ? (
             <img src={clip.thumbnail_url} alt="" />
           ) : (
-            <video src={clip.stream_url} muted preload="metadata" />
+            <video src={clip.stream_url} muted preload="none" />
           )}
           <div className="v2-hero-overlay">
             <h2 className="v2-hero-title">{clip.title}</h2>

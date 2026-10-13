@@ -37,15 +37,13 @@ test.describe("Watch page e2e", () => {
   test("action bar shows pipeline buttons", async ({ page }) => {
     await page.goto(WATCH_URL);
     await expect(page.locator(".v2-actions")).toBeVisible({ timeout: 15000 });
-    const metadataBtn = page.getByRole("button", { name: /Obter metadados/i });
-    const clipsBtn = page.getByRole("button", { name: /Gerar clips/i });
-    await expect(metadataBtn).toBeVisible();
-    await expect(clipsBtn).toBeVisible();
-    if (await metadataBtn.isEnabled()) {
-      await expect(clipsBtn).toBeDisabled();
-    } else {
-      await expect(clipsBtn).toBeEnabled();
-    }
+    await expect(page.getByRole("button", { name: /Obter metadados/i })).toHaveCount(0);
+    const clipBtn = page.getByRole("button", { name: /^Gerar clip$/i });
+    await expect(clipBtn).toBeVisible();
+    await expect(clipBtn).toBeEnabled();
+    await expect(page.getByRole("button", { name: /Remover silêncios/i })).toBeEnabled();
+    await expect(page.getByRole("button", { name: /Gerar legendas/i })).toBeEnabled();
+    await expect(page.getByRole("button", { name: /Publicar/i }).first()).toBeEnabled();
   });
 
   test("video element receives valid src", async ({ page }) => {
@@ -61,45 +59,47 @@ test.describe("Watch page e2e", () => {
     await page.goto(WATCH_URL);
     await page.locator(".v2-logo").click();
     await expect(page).toHaveURL(/localhost:5173\/?$/);
-    await expect(page.locator(".v2-hero, .v2-section").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator(".v2-canvas-empty")).toBeVisible({ timeout: 10000 });
   });
 
-  test("system dock visible on desktop", async ({ page }) => {
+  test("bay shell shows media rail and ops on desktop", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(WATCH_URL);
-    await expect(page.locator(".v2-system-dock")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator(".v2-gauge").first()).toBeVisible();
-    await expect(page.locator(".v2-health-dot").first()).toBeVisible();
+    await expect(page.locator(".v2-bay-rail")).toBeVisible({ timeout: 15000 });
+    await expect(page.locator(".v2-bay-ops")).toBeVisible();
+    await expect(page.locator(".v2-system-dock")).toHaveCount(0);
+    await expect(page.locator(".v2-bay-ops-gauges .v2-gauge").first()).toBeVisible();
+    await expect(page.locator(".v2-bay-ops .v2-health-dot").first()).toBeVisible();
   });
 
-  test("system dock opens from header on mobile", async ({ page }) => {
+  test("ops drawer opens from command strip on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(WATCH_URL);
-    await expect(page.locator(".v2-system-dock")).toBeHidden();
-    await page.getByRole("button", { name: /Sistema/i }).click();
-    await expect(page.locator(".v2-system-dock--open")).toBeVisible({ timeout: 10000 });
-    await expect(page.locator(".v2-gauge").first()).toBeVisible();
+    await expect(page.locator(".v2-bay-ops--open")).toHaveCount(0);
+    await page.getByRole("button", { name: /Abrir painel de ops/i }).click();
+    await expect(page.locator(".v2-bay-ops--open")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator(".v2-bay-ops-gauges .v2-gauge").first()).toBeVisible();
   });
 
-  test("sidebar shows contextual title on watch page", async ({ page }) => {
+  test("ops related section is present on watch page", async ({ page }) => {
     await page.goto(WATCH_URL);
-    await expect(page.locator(".v2-sidebar-title")).toBeVisible({ timeout: 15000 });
-    const title = await page.locator(".v2-sidebar-title").textContent();
-    expect(title).toMatch(/Clipes deste VOD|VOD original/);
+    await expect(page.locator(".v2-bay-ops-title").filter({ hasText: /^Related$/i })).toBeVisible({
+      timeout: 15000,
+    });
   });
 });
 
-test.describe("Generate clips modal", () => {
-  test("does not auto-start analysis", async ({ page }) => {
+test.describe("Create clip modal", () => {
+  test("opens manual timeline editor", async ({ page }) => {
     await page.goto(WATCH_URL);
     await expect(page.locator(".v2-actions")).toBeVisible({ timeout: 15000 });
-    const hasTranscript = await page.getByRole("button", { name: /Gerar clips/i }).isEnabled();
-    test.skip(!hasTranscript, "Video needs transcript for Gerar clips button");
-    await page.getByRole("button", { name: /Gerar clips/i }).click();
-    await expect(page.getByRole("button", { name: /Analisar highlights/i })).toBeVisible();
-    await expect(page.getByText(/Analisando highlights/i)).not.toBeVisible();
-    const counter = page.getByLabel(/Quantidade de highlights/i);
-    await expect(counter).toBeVisible();
-    await expect(counter).toHaveValue("15");
+    await page.getByRole("button", { name: /^Gerar clip$/i }).click();
+    await expect(page.getByRole("heading", { name: /Criar clipe/i })).toBeVisible();
+    await expect(page.locator(".v2-create-clip-preview-frame video")).toBeVisible();
+    await expect(page.locator(".v2-create-clip-track")).toBeVisible();
+    await expect(page.getByPlaceholder(/Adicione um título/i)).toBeVisible();
+    await expect(page.getByText(/Adicionar legendas/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /Salvar clipe/i })).toBeVisible();
+    await expect(page.getByText(/Analisar highlights/i)).toHaveCount(0);
   });
 });

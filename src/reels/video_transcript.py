@@ -58,9 +58,12 @@ def segments_for_clip_job(
     warnings: list[str] | None,
     *,
     shift_to_zero: bool = True,
+    work_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Load parent transcript, slice to clip window, optionally shift times to clip-relative."""
-    _, segments = load_or_transcribe(parent_slug, config, warnings=warnings)
+    _, segments = load_or_transcribe(
+        parent_slug, config, warnings=warnings, persist=False, work_dir=work_dir
+    )
     sliced = slice_segments_for_window(segments, clip_start, clip_end)
     if not shift_to_zero:
         return sliced
@@ -79,6 +82,21 @@ def save_segments(slug: str, segments: list[dict[str, Any]], *, original: bool =
     segments_path(slug).write_text(json.dumps(segments, ensure_ascii=False, indent=2), encoding="utf-8")
     if original:
         shutil.copy2(segments_path(slug), segments_original_path(slug))
+    _sync_transcript_to_db(slug, segments)
+
+
+def _sync_transcript_to_db(slug: str, segments: list[dict[str, Any]]) -> None:
+    """Write-through: keep the transcripts table in sync with the on-disk JSON."""
+    try:
+        from reels import video_repo
+
+        original: list[dict[str, Any]] = []
+        orig_path = segments_original_path(slug)
+        if orig_path.is_file():
+            original = json.loads(orig_path.read_text(encoding="utf-8"))
+        video_repo.save_transcript(slug, segments, original)
+    except Exception:
+        pass
 
 
 def load_or_transcribe(
@@ -87,35 +105,49 @@ def load_or_transcribe(
     *,
     warnings: list[str] | None = None,
     force: bool = False,
+    persist: bool = False,
+    work_dir: Path | None = None,
 ) -> tuple[VideoMetadata, list[dict[str, Any]]]:
-    """Return metadata + segments; run Whisper only if segments.json is missing."""
+    """Return metadata + Whisper segments.
+
+    By default does **not** write library transcript files/DB (``persist=False``).
+    Pass ``work_dir`` to cache audio/segments under a job folder for ephemeral reuse.
+    """
     meta = resolve_video_id(video_id)
     if meta.kind == "clip" and meta.parent_slug:
         video_id = meta.parent_slug
         meta = resolve_video_id(video_id)
 
-    existing = load_segments(video_id)
-    if existing is not None and not force:
-        return meta, existing
+    if not force:
+        if work_dir is not None:
+            job_seg = work_dir / "segments.json"
+            if job_seg.is_file():
+                return meta, json.loads(job_seg.read_text(encoding="utf-8"))
+        # Read existing library transcript if present (do not require persist).
+        existing = load_segments(video_id)
+        if existing is not None:
+            return meta, existing
 
     cfg = config or load_config("twitch_gaming")
     video_path = source_path(video_id)
     if not video_path.is_file():
         raise FileNotFoundError(f"Source video missing: {video_path}")
 
-    out = transcript_dir(video_id)
+    out = work_dir if work_dir is not None else transcript_dir(video_id)
+    out.mkdir(parents=True, exist_ok=True)
     info = probe_video(video_path)
     _proxy, audio, _preview = generate_proxy(video_path, out, cfg, info, skip_if_exists=True)
-    if audio.resolve() != audio_path(video_id).resolve() and audio.is_file():
-        audio_path(video_id).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(audio, audio_path(video_id))
 
-    segments = transcribe_audio(
-        audio_path(video_id) if audio_path(video_id).is_file() else audio,
-        cfg,
-        warnings=warnings,
-    )
-    save_segments(video_id, segments, original=True)
+    segments = transcribe_audio(audio, cfg, warnings=warnings)
+    if work_dir is not None:
+        (work_dir / "segments.json").write_text(
+            json.dumps(segments, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    if persist:
+        if audio.resolve() != audio_path(video_id).resolve() and audio.is_file():
+            audio_path(video_id).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(audio, audio_path(video_id))
+        save_segments(video_id, segments, original=True)
     return meta, segments
 
 

@@ -3,6 +3,13 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+# Avast injects SSLKEYLOGFILE=\\.\aswMonFltProxy\... which breaks pip/yt-dlp HTTPS
+# with PermissionError / "Unsupported url scheme: https (websockets)".
+if ($env:SSLKEYLOGFILE -and ($env:SSLKEYLOGFILE -like '*aswMonFltProxy*' -or $env:SSLKEYLOGFILE -like '\\.\*')) {
+    Write-Host "reels: clearing Avast SSLKEYLOGFILE so HTTPS downloads work" -ForegroundColor Yellow
+    Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
+}
+
 $VenvReels = Join-Path $Root ".venv\Scripts\reels.exe"
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
 

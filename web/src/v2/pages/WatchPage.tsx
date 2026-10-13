@@ -1,33 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { fetchRelated, postTransformReel, type VideoSummary } from "../../api/v2";
-import type { JobState } from "../../api/client";
-import { formatMmSs, formatRange } from "../../utils/timeFormat";
-import AppHeader from "../components/AppHeader";
+import { postTransformReel } from "../../api/v2";
+import type { JobState } from "../../api/jobs";
+import { formatMmSs } from "../../utils/timeFormat";
 import ActionBar from "../components/ActionBar";
 import CaptionsModal from "../components/CaptionsModal";
 import PublishModal from "../components/PublishModal";
 import CleanupModal from "../components/CleanupModal";
 import FormatToggle, { type ClipFormat } from "../components/FormatToggle";
-import GenerateClipsModal from "../components/GenerateClipsModal";
+import CreateClipModal from "../components/CreateClipModal";
 import JobProgressBar from "../components/JobProgressBar";
 import TransformReelModal from "../components/TransformReelModal";
-import TranscriptEditor from "../components/TranscriptEditor";
 import TrimEditor from "../components/TrimEditor";
 import WatchPlayer from "../components/WatchPlayer";
 import WebcamModal from "../components/WebcamModal";
+import { useBay } from "../context/BayContext";
 import { useVideo } from "../hooks/useVideo";
 import { useV2Job } from "../hooks/useV2Job";
-import "../v2.css";
 
 function formatDuration(seconds: number): string {
   return formatMmSs(seconds);
 }
 
-function formatBadges(formats?: string[]): string {
-  if (!formats?.length) return "";
-  const labels = formats.map((f) => (f === "reels" ? "Mobile" : f === "youtube" ? "Desktop" : f));
-  return labels.join(" · ");
+function formatSizeBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 ** 3) {
+    const mb = bytes / 1024 ** 2;
+    return mb >= 100 ? `${mb.toFixed(0)} MB` : `${mb.toFixed(1)} MB`;
+  }
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
 function pickDefaultFormat(formats: string[], query: string | null): ClipFormat {
@@ -42,8 +44,8 @@ export default function WatchPage() {
   const { id = "" } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { video, loading, error, refresh } = useVideo(id);
-  const [related, setRelated] = useState<VideoSummary[]>([]);
-  const [clipsModalOpen, setClipsModalOpen] = useState(false);
+  const { setOpenPublish, setCanPublish, refreshMedia } = useBay();
+  const [createClipModalOpen, setCreateClipModalOpen] = useState(false);
   const [captionsModalOpen, setCaptionsModalOpen] = useState(false);
   const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
@@ -62,13 +64,20 @@ export default function WatchPage() {
     setActiveFormat(pickDefaultFormat(clipFormats, searchParams.get("format")));
   }, [video?.id, video?.kind, clipFormats.join(","), searchParams]);
 
+  const optimisticSrc = useMemo(() => {
+    if (!id || id.includes("::")) return "";
+    return `/api/v2/media/${encodeURIComponent(id)}/source.mp4`;
+  }, [id]);
+
   const streamSrc = useMemo(() => {
-    if (!video) return "";
-    if (video.kind === "clip" && video.stream_urls) {
-      return video.stream_urls[activeFormat] || video.stream_url;
+    if (video) {
+      if (video.kind === "clip" && video.stream_urls) {
+        return video.stream_urls[activeFormat] || video.stream_url;
+      }
+      return video.stream_url || optimisticSrc;
     }
-    return video.stream_url;
-  }, [video, activeFormat]);
+    return optimisticSrc;
+  }, [video, activeFormat, optimisticSrc]);
 
   const handleFormatChange = useCallback(
     (fmt: ClipFormat) => {
@@ -80,33 +89,26 @@ export default function WatchPage() {
     [searchParams, setSearchParams]
   );
 
-  const reloadRelated = useCallback(async () => {
-    if (!id) return;
-    try {
-      const r = await fetchRelated(id);
-      setRelated(r.items);
-    } catch {
-      setRelated([]);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    void reloadRelated();
-  }, [reloadRelated]);
-
-  const seekTo = useCallback((t: number) => {
-    const v = playerRef.current;
-    if (v) {
-      v.currentTime = t;
-      v.play().catch(() => {});
-    }
-  }, []);
-
   const handleFeatureDone = useCallback(() => {
     void refresh();
-    void reloadRelated();
-    window.setTimeout(() => void reloadRelated(), 1000);
-  }, [refresh, reloadRelated]);
+    refreshMedia();
+  }, [refresh, refreshMedia]);
+
+  useEffect(() => {
+    if (video) {
+      setCanPublish(true);
+      setOpenPublish(() => {
+        setPublishModalOpen(true);
+      });
+    } else {
+      setCanPublish(false);
+      setOpenPublish(null);
+    }
+    return () => {
+      setCanPublish(false);
+      setOpenPublish(null);
+    };
+  }, [video, setCanPublish, setOpenPublish]);
 
   const onTransformCompleted = useCallback(
     (job: JobState) => {
@@ -175,65 +177,42 @@ export default function WatchPage() {
     [video, transformRunning, waitForTransformJob]
   );
 
-  if (loading) {
+  if (error && !video && !loading) {
     return (
-      <div className="v2-root">
-        <div className="v2-shell">
-          <AppHeader />
-          <p className="v2-loading">Carregando vídeo…</p>
-        </div>
+      <div className="v2-bay-canvas-body">
+        <p className="v2-error">{error || "Vídeo não encontrado"}</p>
+        <Link to="/" className="v2-btn">
+          Voltar
+        </Link>
       </div>
     );
   }
-
-  if (error || !video) {
-    return (
-      <div className="v2-root">
-        <div className="v2-shell">
-          <AppHeader />
-          <p className="v2-error">{error || "Vídeo não encontrado"}</p>
-          <Link to="/" className="v2-btn">
-            Voltar
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const sidebarTitle = video.kind === "clip" ? "VOD original" : "Clipes deste VOD";
-  const emptyMessage =
-    video.kind === "clip" ? "VOD original não encontrado." : "Nenhum clipe gerado ainda.";
 
   return (
-    <div className="v2-root">
-      <div className="v2-shell">
-        <AppHeader />
-        <div className="v2-watch">
-          <div>
-            <WatchPlayer
-              ref={playerRef}
-              src={streamSrc}
-              title={video.title}
-              vertical={video.kind === "clip" && activeFormat === "reels"}
-            />
-            <div className="v2-watch-title-row">
-              <h1 className="v2-watch-title">{video.title}</h1>
-              {video.kind === "clip" && (
-                <FormatToggle
-                  formats={clipFormats}
-                  active={activeFormat}
-                  onChange={handleFormatChange}
-                />
-              )}
-            </div>
-            <p className="v2-card-meta">
-              {video.duration > 0 ? formatDuration(video.duration) : ""}
-              {video.size_bytes ? ` · ${(video.size_bytes / 1024 ** 2).toFixed(0)} MB` : ""}
-            </p>
+    <div className="v2-bay-canvas-body">
+      <WatchPlayer
+        ref={playerRef}
+        src={streamSrc}
+        title={video?.title || "Carregando…"}
+        vertical={video?.kind === "clip" && activeFormat === "reels"}
+      />
+      {!trimMode && (
+        <>
+          <div className="v2-watch-title-row">
+            <h1 className="v2-watch-title">{video?.title || (loading ? "Carregando…" : id)}</h1>
+            {video?.kind === "clip" && (
+              <FormatToggle formats={clipFormats} active={activeFormat} onChange={handleFormatChange} />
+            )}
+          </div>
+          <p className="v2-card-meta">
+            {video && video.duration > 0 ? formatDuration(video.duration) : loading ? "…" : ""}
+            {video?.size_bytes ? ` · ${formatSizeBytes(video.size_bytes)}` : ""}
+          </p>
+          {video ? (
             <ActionBar
               video={video}
               onRefresh={refresh}
-              onGenerateClips={() => setClipsModalOpen(true)}
+              onGenerateClip={() => setCreateClipModalOpen(true)}
               onOpenCaptions={() => setCaptionsModalOpen(true)}
               onOpenCleanup={() => setCleanupModalOpen(true)}
               onOpenPublish={() => setPublishModalOpen(true)}
@@ -248,86 +227,53 @@ export default function WatchPage() {
               transformBusy={transformRunning}
               onTransformReel={() => setTransformModalOpen(true)}
             />
-            {(transformRunning || transformJob) && (
-              <div className="v2-trim-processing">
-                <JobProgressBar job={transformJob} onCancel={cancelTransformJob} />
-              </div>
-            )}
-            {(transformMessage || transformError) && (
-              <p className="v2-card-meta">
-                {transformError || transformMessage}
-                {transformClipId && (
-                  <>
-                    {" "}
-                    <Link to={`/watch/${transformClipId}?format=reels`}>Abrir reel</Link>
-                  </>
-                )}
-              </p>
-            )}
-            {trimMode && video.duration > 0 && (
-              <TrimEditor
-                video={video}
-                duration={video.duration}
-                playerRef={playerRef}
-                sourceFormat={video.kind === "clip" ? activeFormat : undefined}
-                onClose={() => setTrimMode(false)}
-                onDone={() => {
-                  setTrimMode(false);
-                  handleFeatureDone();
-                }}
-              />
-            )}
-            {video.has_transcript && (
-              <TranscriptEditor
-                videoId={video.id}
-                syncToParent={video.kind === "clip"}
-                onSaved={refresh}
-              />
-            )}
-          </div>
-          <aside className="v2-sidebar">
-            <p className="v2-sidebar-title">{sidebarTitle}</p>
-            {related.length === 0 && <p className="v2-card-meta">{emptyMessage}</p>}
-            {related.map((item) => (
-              <Link key={item.id} to={`/watch/${item.id}`} className="v2-related-card">
-                <div
-                  className={`v2-related-thumb${
-                    item.format === "reels" ? " v2-related-thumb--vertical" : ""
-                  }`}
-                >
-                  <video src={item.stream_url} muted preload="metadata" />
-                </div>
-                <div>
-                  <p className="v2-card-title" style={{ margin: 0 }}>
-                    {item.title}
-                  </p>
-                  <p className="v2-card-meta">
-                    {item.start != null && item.end != null
-                      ? formatRange(item.start, item.end)
-                      : item.duration > 0
-                        ? formatDuration(item.duration)
-                        : ""}
-                    {formatBadges(item.formats) ? ` · ${formatBadges(item.formats)}` : ""}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </aside>
-        </div>
-      </div>
-      {clipsModalOpen && (
-        <GenerateClipsModal
+          ) : (
+            <p className="v2-loading">Carregando detalhes…</p>
+          )}
+          {(transformRunning || transformJob) && (
+            <div className="v2-trim-processing">
+              <JobProgressBar job={transformJob} onCancel={cancelTransformJob} />
+            </div>
+          )}
+          {(transformMessage || transformError) && (
+            <p className="v2-card-meta">
+              {transformError || transformMessage}
+              {transformClipId && (
+                <>
+                  {" "}
+                  <Link to={`/watch/${transformClipId}?format=reels`}>Abrir reel</Link>
+                </>
+              )}
+            </p>
+          )}
+        </>
+      )}
+      {trimMode && video && video.duration > 0 && (
+        <TrimEditor
           video={video}
+          duration={video.duration}
           playerRef={playerRef}
-          onSeek={seekTo}
-          onClose={() => setClipsModalOpen(false)}
+          sourceFormat={video.kind === "clip" ? activeFormat : undefined}
+          onClose={() => setTrimMode(false)}
           onDone={() => {
-            setClipsModalOpen(false);
+            setTrimMode(false);
             handleFeatureDone();
           }}
         />
       )}
-      {captionsModalOpen && (
+      {createClipModalOpen && video && (
+        <CreateClipModal
+          video={video}
+          playerRef={playerRef}
+          streamSrc={streamSrc}
+          onClose={() => setCreateClipModalOpen(false)}
+          onDone={() => {
+            setCreateClipModalOpen(false);
+            handleFeatureDone();
+          }}
+        />
+      )}
+      {captionsModalOpen && video && (
         <CaptionsModal
           video={video}
           sourceFormat={video.kind === "clip" ? activeFormat : undefined}
@@ -338,7 +284,7 @@ export default function WatchPage() {
           }}
         />
       )}
-      {cleanupModalOpen && (
+      {cleanupModalOpen && video && (
         <CleanupModal
           video={video}
           sourceFormat={video.kind === "clip" ? activeFormat : undefined}
@@ -349,19 +295,22 @@ export default function WatchPage() {
           }}
         />
       )}
-      {publishModalOpen && (
+      {publishModalOpen && video && (
         <PublishModal
           video={video}
           sourceFormat={video.kind === "clip" ? activeFormat : undefined}
           onClose={() => setPublishModalOpen(false)}
         />
       )}
-      {webcamModalOpen && (
+      {webcamModalOpen && video && (
         <WebcamModal
           video={video}
           playerRef={playerRef}
           onClose={() => setWebcamModalOpen(false)}
-          onSaved={() => void refresh()}
+          onSaved={() => {
+            void refresh();
+            setWebcamModalOpen(false);
+          }}
         />
       )}
       {transformModalOpen && (
